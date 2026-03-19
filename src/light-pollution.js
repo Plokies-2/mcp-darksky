@@ -20,6 +20,7 @@ async function getNodePaths() {
     defaultDataDir: path.join(projectRoot, "data"),
     defaultStatsPath: path.join(projectRoot, "data", "black-marble-korea-stats.json"),
     defaultDistributionPath: path.join(projectRoot, "data", "black-marble-korea-distribution.json"),
+    defaultRuntimeArtifactPath: path.join(projectRoot, "data", "black-marble-korea-runtime.npz"),
     defaultBoundaryPath: path.join(projectRoot, "data", "south-korea-boundary.geojson"),
   };
 }
@@ -34,6 +35,8 @@ export async function getEstimatedLightPollution({
   dataDir,
   statsPath,
   distributionPath,
+  boundaryPath = globalThis.process?.env?.BLACK_MARBLE_BOUNDARY_PATH,
+  runtimeArtifactPath = globalThis.process?.env?.BLACK_MARBLE_RUNTIME_ARTIFACT_PATH,
   pythonBin = globalThis.process?.env?.PYTHON_BIN ?? "python",
 } = {}) {
   if (!isNodeRuntime()) {
@@ -63,8 +66,10 @@ export async function getEstimatedLightPollution({
           statsPath ?? paths.defaultStatsPath,
           "--distribution",
           distributionPath ?? paths.defaultDistributionPath,
+          "--runtime-artifact",
+          runtimeArtifactPath ?? paths.defaultRuntimeArtifactPath,
           "--boundary",
-          paths.defaultBoundaryPath,
+          boundaryPath ?? paths.defaultBoundaryPath,
           "--lat",
           String(latitude),
           "--lon",
@@ -78,7 +83,7 @@ export async function getEstimatedLightPollution({
       return JSON.parse(stdout);
     } catch (error) {
       const message = error?.stderr?.trim() || error?.stdout?.trim() || error?.message || "Unknown error";
-      throw new Error(`Failed to estimate light pollution from local Black Marble tiles: ${message}`, { cause: error });
+      throw new Error(`Failed to estimate light pollution from Black Marble data: ${message}`, { cause: error });
     }
   })().catch((error) => {
     estimateCache.delete(cacheKey);

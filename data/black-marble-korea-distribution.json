@@ -1,6 +1,48 @@
 {
-  "generated_at": "2026-03-19T07:11:24.440983+00:00",
+  "generated_at": "2026-03-19T11:36:07.435672+00:00",
   "version": "2026-03-19-continuous-bortle-v2-korea-calibrated",
+  "source_products": {
+    "latest_product_year": 2025,
+    "source_years": [
+      2025
+    ],
+    "sensors": {
+      "VNP46A4": {
+        "tile_count": 2,
+        "tiles": [
+          {
+            "tile_id": "h30v05",
+            "product_year": 2025,
+            "day_of_year": 1,
+            "filename": "VNP46A4.A2025001.h30v05.002.2026077004206.h5"
+          },
+          {
+            "tile_id": "h31v05",
+            "product_year": 2025,
+            "day_of_year": 1,
+            "filename": "VNP46A4.A2025001.h31v05.002.2026077022316.h5"
+          }
+        ]
+      },
+      "VJ146A4": {
+        "tile_count": 2,
+        "tiles": [
+          {
+            "tile_id": "h30v05",
+            "product_year": 2025,
+            "day_of_year": 1,
+            "filename": "VJ146A4.A2025001.h30v05.002.2026072180152.h5"
+          },
+          {
+            "tile_id": "h31v05",
+            "product_year": 2025,
+            "day_of_year": 1,
+            "filename": "VJ146A4.A2025001.h31v05.002.2026072180318.h5"
+          }
+        ]
+      }
+    }
+  },
   "boundary": {
     "country": "Republic of Korea",
     "boundary_path": "C:\\Users\\song7\\Desktop\\school\\2026-1\\projects\\mcp_darksky\\data\\south-korea-boundary.geojson",
@@ -8,13 +50,13 @@
   },
   "grid": {
     "tile_ids": [
-      "h30v04",
       "h30v05",
-      "h31v04",
       "h31v05"
     ],
-    "rows": 4800,
+    "rows": 2400,
     "cols": 4800,
+    "pixels_per_degree": 240,
+    "tile_size_px": 2400,
     "regional_radius_px": 45,
     "resolution_arcsec": 15
   },

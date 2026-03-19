@@ -1,0 +1,12 @@
+.git
+.env
+node_modules
+test
+docs
+paper.md
+output-http*.log
+output-http*.err
+home-preview.html
+install-preview.html
+data/VNP46A4
+data/VJ146A4

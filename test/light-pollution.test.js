@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,9 +11,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
 const statsPath = path.join(projectRoot, "data", "black-marble-korea-stats.json");
 const distributionPath = path.join(projectRoot, "data", "black-marble-korea-distribution.json");
+const runtimeArtifactPath = path.join(projectRoot, "test", "fixtures", "black-marble-runtime-mini.npz");
 const vnpDir = path.join(projectRoot, "data", "VNP46A4");
 const vjDir = path.join(projectRoot, "data", "VJ146A4");
 const hasBlackMarbleData = fs.existsSync(vnpDir) && fs.existsSync(vjDir);
+const hasPythonWithNumpy = spawnSync("python", ["-c", "import numpy"], { stdio: "ignore" }).status === 0;
+const hasRuntimeArtifactFixture = hasPythonWithNumpy && fs.existsSync(runtimeArtifactPath);
 
 function buildHour(time, overrides = {}) {
   return {
@@ -61,6 +65,27 @@ test("light pollution estimate separates Seoul from a dark mountain site", { ski
   assert.ok(typeof seoul.equivalent_zenith_brightness_mpsas === "number");
 });
 
+test("runtime artifact estimate separates Seoul from a dark mountain site", { skip: !hasRuntimeArtifactFixture }, async () => {
+  clearLightPollutionCache();
+
+  const seoul = await getEstimatedLightPollution({
+    latitude: 37.5665,
+    longitude: 126.9780,
+    runtimeArtifactPath,
+  });
+  const anbandegi = await getEstimatedLightPollution({
+    latitude: 37.6229,
+    longitude: 128.7391,
+    runtimeArtifactPath,
+  });
+
+  assert.equal(seoul.sensor_samples.runtime_artifact.version, "test-fixture-runtime-artifact-v1");
+  assert.ok(seoul.estimated_bortle_center > anbandegi.estimated_bortle_center);
+  assert.ok(seoul.local_radiance > anbandegi.local_radiance);
+  assert.ok(seoul.estimated_bortle_range.low <= seoul.estimated_bortle_center);
+  assert.ok(seoul.estimated_bortle_range.high >= seoul.estimated_bortle_center);
+});
+
 test("light pollution estimate includes Korea-wide percentile context when distribution data exists", {
   skip: !hasBlackMarbleData || !fs.existsSync(distributionPath),
 }, async () => {
@@ -75,6 +100,22 @@ test("light pollution estimate includes Korea-wide percentile context when distr
   assert.ok(typeof seoul.distribution_context.brightness_percentile_in_korea === "number");
   assert.ok(typeof seoul.distribution_context.darkness_percentile_in_korea === "number");
   assert.ok(typeof seoul.distribution_context.estimated_bortle_distribution_skewness === "number");
+});
+
+test("runtime artifact estimate includes Korea-wide percentile context when distribution data exists", {
+  skip: !hasRuntimeArtifactFixture || !fs.existsSync(distributionPath),
+}, async () => {
+  clearLightPollutionCache();
+
+  const seoul = await getEstimatedLightPollution({
+    latitude: 37.5665,
+    longitude: 126.9780,
+    runtimeArtifactPath,
+  });
+
+  assert.ok(seoul.distribution_context);
+  assert.ok(typeof seoul.distribution_context.brightness_percentile_in_korea === "number");
+  assert.ok(typeof seoul.distribution_context.darkness_percentile_in_korea === "number");
 });
 
 test("dark Korean mountain sites no longer collapse into unrealistic class-1 or class-2 centers", {

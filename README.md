@@ -236,6 +236,8 @@ npm run deploy:worker
 - `PUBLIC_BASE_URL`: 외부에서 보이는 서비스 기본 URL
 - `KAKAO_REST_API_KEY`: `place_query` 사용 시 필요
 - `REST_API_KEY`: 로컬 호환용 alias
+- `BLACK_MARBLE_RUNTIME_ARTIFACT_PATH`: runtime artifact 경로 override
+- `BLACK_MARBLE_RUNTIME_ARTIFACT_URL`: Railway 부팅 시 runtime artifact 다운로드 URL
 - `ALLOWED_HOSTS`: Node HTTP 허용 호스트 목록
 - `MCP_TRANSPORT=http`: `npm start`를 HTTP 모드로 실행
 
@@ -255,6 +257,7 @@ Workers를 쓸 경우에는 `wrangler.toml` 또는 배포 변수에:
 
 - `data/VNP46A4/...`
 - `data/VJ146A4/...`
+- `data/black-marble-korea-runtime.npz`
 - `data/black-marble-korea-distribution.json`
 
 이 원본 타일은 매우 크기 때문에 GitHub 레포에는 포함하지 않는 것을 권장합니다.
@@ -265,6 +268,7 @@ Workers를 쓸 경우에는 `wrangler.toml` 또는 배포 변수에:
 npm install
 npm run build:light-pollution-stats
 npm run build:light-pollution-distribution
+npm run build:light-pollution-runtime-artifact
 npm test
 ```
 
@@ -276,7 +280,8 @@ npm test
 - 필요 시 `ALLOWED_HOSTS`
 
 2. 로컬 데이터 확인
-- 광해 추정을 쓸 경우 `data/VNP46A4`, `data/VJ146A4`, distribution 파일 존재 확인
+- 광해 추정을 쓸 경우 `data/black-marble-korea-runtime.npz` 존재 확인
+- raw tile fallback을 유지할 경우 `data/VNP46A4`, `data/VJ146A4`, distribution 파일 존재 확인
 
 3. 테스트 실행
 - `npm test`

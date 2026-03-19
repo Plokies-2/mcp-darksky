@@ -8,11 +8,13 @@
     "start": "node src/index.js",
     "start:stdio": "node src/stdio.js",
     "start:http": "node src/http.js",
+    "start:railway": "node scripts/boot-railway.mjs",
     "dev:worker": "wrangler dev",
     "deploy:worker": "wrangler deploy",
     "build:light-pollution-stats": "python scripts/black_marble_bortle.py build-stats --data-dir data --output data/black-marble-korea-stats.json",
     "build:light-pollution-distribution": "python scripts/black_marble_bortle.py build-distribution --data-dir data --stats data/black-marble-korea-stats.json --output data/black-marble-korea-distribution.json",
-    "sample:light-pollution": "python scripts/black_marble_bortle.py sample --data-dir data --stats data/black-marble-korea-stats.json --lat 37.5665 --lon 126.9780",
+    "build:light-pollution-runtime-artifact": "python scripts/black_marble_bortle.py build-runtime-artifact --data-dir data --output data/black-marble-korea-runtime.npz",
+    "sample:light-pollution": "python scripts/black_marble_bortle.py sample --data-dir data --stats data/black-marble-korea-stats.json --runtime-artifact data/black-marble-korea-runtime.npz --lat 37.5665 --lon 126.9780",
     "test": "node --test"
   },
   "keywords": [

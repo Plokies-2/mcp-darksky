@@ -7,10 +7,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-import h5py
 import numpy as np
-from shapely import contains_xy
-from shapely.geometry import shape
 
 GRID_PATH = "HDFEOS/GRIDS/VIIRS_Grid_DNB_2d/Data Fields"
 PRIMARY_LAYER = "AllAngle_Composite_Snow_Free"
@@ -29,10 +26,13 @@ RADIANCE_FLOOR = 0.5
 DEFAULT_DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 DEFAULT_STATS_PATH = DEFAULT_DATA_DIR / "black-marble-korea-stats.json"
 DEFAULT_DISTRIBUTION_PATH = DEFAULT_DATA_DIR / "black-marble-korea-distribution.json"
+DEFAULT_RUNTIME_ARTIFACT_PATH = DEFAULT_DATA_DIR / "black-marble-korea-runtime.npz"
 DEFAULT_BOUNDARY_PATH = DEFAULT_DATA_DIR / "south-korea-boundary.geojson"
 KM_PER_DEGREE = 111.32
 PIXELS_PER_DEGREE = 240
+TILE_SIZE_PX = 2400
 REGIONAL_RADIUS_PX = 45
+RUNTIME_ARTIFACT_VERSION = "2026-03-19-continuous-bortle-v2-korea-runtime-artifact"
 # Presentation-layer anchors tuned against a small Republic-of-Korea benchmark
 # set collected from LightPollutionMap.info's 2025 sky-brightness overlay.
 # The underlying radiance/SQM proxy remains unchanged; only the user-facing
@@ -49,18 +49,94 @@ DISPLAY_BORTLE_PERCENTILE_ANCHORS = [
   (97.0, 8.0),
   (100.0, 8.8),
 ]
+SENSORS = ("VNP46A4", "VJ146A4")
 TILE_PATTERN = re.compile(r"(h\d{2}v\d{2})")
+PRODUCT_PATTERN = re.compile(r"A(\d{4})(\d{3})")
 
 
-def dataset(file_handle: h5py.File, name: str):
+def dataset(file_handle, name: str):
   return file_handle[f"{GRID_PATH}/{name}"]
 
 
-def open_sensor_tile(data_dir: Path, sensor: str, tile_id: str) -> tuple[Path, h5py.File]:
-  matches = sorted((data_dir / sensor).glob(f"*{tile_id}*.h5"))
-  if not matches:
+def load_h5py():
+  import h5py
+
+  return h5py
+
+
+def load_shapely_helpers():
+  from shapely import contains_xy
+  from shapely.geometry import shape
+
+  return contains_xy, shape
+
+
+def parse_product_stamp(value: str) -> tuple[int, int]:
+  match = PRODUCT_PATTERN.search(value)
+  if not match:
+    raise ValueError(f"Could not parse product stamp from {value}")
+  return int(match.group(1)), int(match.group(2))
+
+
+def sensor_tile_sort_key(path: Path) -> tuple[int, int, str]:
+  year, day_of_year = parse_product_stamp(path.name)
+  return year, day_of_year, path.name
+
+
+def latest_sensor_tile_paths(data_dir: Path, sensor: str) -> dict[str, Path]:
+  selected: dict[str, Path] = {}
+  for path in sorted((data_dir / sensor).glob("*.h5")):
+    tile_id, _, _ = parse_tile_id(path.name)
+    current = selected.get(tile_id)
+    if current is None or sensor_tile_sort_key(path) > sensor_tile_sort_key(current):
+      selected[tile_id] = path
+  return selected
+
+
+def selected_sensor_tile_paths(data_dir: Path) -> dict[str, dict[str, Path]]:
+  return {sensor: latest_sensor_tile_paths(data_dir, sensor) for sensor in SENSORS}
+
+
+def build_source_products(selected_paths_by_sensor: dict[str, dict[str, Path]]) -> dict[str, object]:
+  products: dict[str, object] = {}
+  source_years: set[int] = set()
+
+  for sensor in SENSORS:
+    tiles = selected_paths_by_sensor.get(sensor, {})
+    tile_entries = []
+    for tile_id, path in sorted(tiles.items(), key=lambda item: parse_tile_id(item[0])[1:]):
+      year, day_of_year = parse_product_stamp(path.name)
+      source_years.add(year)
+      tile_entries.append({
+        "tile_id": tile_id,
+        "product_year": year,
+        "day_of_year": day_of_year,
+        "filename": path.name,
+      })
+
+    products[sensor] = {
+      "tile_count": len(tile_entries),
+      "tiles": tile_entries,
+    }
+
+  return {
+    "latest_product_year": max(source_years) if source_years else None,
+    "source_years": sorted(source_years),
+    "sensors": products,
+  }
+
+
+def open_sensor_tile(
+  data_dir: Path,
+  sensor: str,
+  tile_id: str,
+  selected_tiles: dict[str, Path] | None = None,
+):
+  h5py = load_h5py()
+  tiles = selected_tiles or latest_sensor_tile_paths(data_dir, sensor)
+  path = tiles.get(tile_id)
+  if path is None:
     raise FileNotFoundError(f"Missing {sensor} tile {tile_id} under {data_dir / sensor}")
-  path = matches[0]
   return path, h5py.File(path, "r")
 
 
@@ -78,31 +154,35 @@ def parse_tile_id(value: str) -> tuple[str, int, int]:
   return tile_id, int(tile_id[1:3]), int(tile_id[4:6])
 
 
-def discover_tile_ids(data_dir: Path) -> list[str]:
+def discover_tile_ids(
+  data_dir: Path,
+  selected_paths_by_sensor: dict[str, dict[str, Path]] | None = None,
+) -> list[str]:
+  selected_paths_by_sensor = selected_paths_by_sensor or selected_sensor_tile_paths(data_dir)
   tile_ids: set[str] = set()
-  for sensor in ["VNP46A4", "VJ146A4"]:
-    for path in sorted((data_dir / sensor).glob("*.h5")):
-      tile_id, _, _ = parse_tile_id(path.name)
-      tile_ids.add(tile_id)
+  for sensor in SENSORS:
+    tile_ids.update(selected_paths_by_sensor.get(sensor, {}).keys())
   return sorted(tile_ids, key=lambda tile_id: parse_tile_id(tile_id)[1:])
 
 
 def load_country_geometry(boundary_path: Path):
+  _contains_xy, shape = load_shapely_helpers()
   payload = json.loads(boundary_path.read_text(encoding="utf-8"))
   feature = payload["features"][0]
   return shape(feature["geometry"])
 
 
-def country_mask_for_tile(file_handle: h5py.File, country_geometry) -> np.ndarray:
+def country_mask_for_tile(file_handle, country_geometry) -> np.ndarray:
+  contains_xy, _shape = load_shapely_helpers()
   north = float(file_handle.attrs["NorthBoundingCoord"])
   south = float(file_handle.attrs["SouthBoundingCoord"])
   west = float(file_handle.attrs["WestBoundingCoord"])
   east = float(file_handle.attrs["EastBoundingCoord"])
 
-  lat_step = (north - south) / 2400
-  lon_step = (east - west) / 2400
-  latitudes = north - (np.arange(2400, dtype=np.float64) + 0.5) * lat_step
-  longitudes = west + (np.arange(2400, dtype=np.float64) + 0.5) * lon_step
+  lat_step = (north - south) / TILE_SIZE_PX
+  lon_step = (east - west) / TILE_SIZE_PX
+  latitudes = north - (np.arange(TILE_SIZE_PX, dtype=np.float64) + 0.5) * lat_step
+  longitudes = west + (np.arange(TILE_SIZE_PX, dtype=np.float64) + 0.5) * lon_step
   lon_grid, lat_grid = np.meshgrid(longitudes, latitudes)
   return contains_xy(country_geometry, lon_grid, lat_grid)
 
@@ -112,15 +192,15 @@ def slices_for_radius(file_handle: h5py.File, lat: float, lon: float, radius_km:
   west = float(file_handle.attrs["WestBoundingCoord"])
   row_center = int((north - lat) * PIXELS_PER_DEGREE)
   col_center = int((lon - west) * PIXELS_PER_DEGREE)
-  row_center = min(max(row_center, 0), 2399)
-  col_center = min(max(col_center, 0), 2399)
+  row_center = min(max(row_center, 0), TILE_SIZE_PX - 1)
+  col_center = min(max(col_center, 0), TILE_SIZE_PX - 1)
 
   lat_radius = max(1, math.ceil(radius_km / (KM_PER_DEGREE / PIXELS_PER_DEGREE)))
   lon_scale = max(math.cos(math.radians(lat)), 0.2)
   lon_radius = max(1, math.ceil(radius_km / ((KM_PER_DEGREE * lon_scale) / PIXELS_PER_DEGREE)))
 
-  row_slice = slice(max(0, row_center - lat_radius), min(2400, row_center + lat_radius + 1))
-  col_slice = slice(max(0, col_center - lon_radius), min(2400, col_center + lon_radius + 1))
+  row_slice = slice(max(0, row_center - lat_radius), min(TILE_SIZE_PX, row_center + lat_radius + 1))
+  col_slice = slice(max(0, col_center - lon_radius), min(TILE_SIZE_PX, col_center + lon_radius + 1))
   return row_slice, col_slice
 
 
@@ -129,7 +209,7 @@ def pixel_index_for(file_handle: h5py.File, lat: float, lon: float) -> tuple[int
   west = float(file_handle.attrs["WestBoundingCoord"])
   row_center = int((north - lat) * PIXELS_PER_DEGREE)
   col_center = int((lon - west) * PIXELS_PER_DEGREE)
-  return min(max(row_center, 0), 2399), min(max(col_center, 0), 2399)
+  return min(max(row_center, 0), TILE_SIZE_PX - 1), min(max(col_center, 0), TILE_SIZE_PX - 1)
 
 
 def compute_window_stats(
@@ -245,13 +325,15 @@ def sample_sensor(file_handle: h5py.File, lat: float, lon: float, country_geomet
 
 
 def merged_stats_payload(data_dir: Path, boundary_path: Path) -> dict[str, object]:
+  h5py = load_h5py()
   sensor_stats: dict[str, object] = {}
   merged_positive: list[np.ndarray] = []
   country_geometry = load_country_geometry(boundary_path)
+  selected_paths_by_sensor = selected_sensor_tile_paths(data_dir)
 
-  for sensor in ["VNP46A4", "VJ146A4"]:
+  for sensor in SENSORS:
     sensor_positive: list[np.ndarray] = []
-    for path in sorted((data_dir / sensor).glob("*.h5")):
+    for path in selected_paths_by_sensor.get(sensor, {}).values():
       with h5py.File(path, "r") as file_handle:
         radiance = dataset(file_handle, PRIMARY_LAYER)[:]
         quality = dataset(file_handle, PRIMARY_QUALITY)[:]
@@ -304,6 +386,7 @@ def merged_stats_payload(data_dir: Path, boundary_path: Path) -> dict[str, objec
   return {
     "generated_at": datetime.now(timezone.utc).isoformat(),
     "radiance_layer": PRIMARY_LAYER,
+    "source_products": build_source_products(selected_paths_by_sensor),
     "boundary": {
       "country": "Republic of Korea",
       "boundary_path": str(boundary_path),
@@ -549,8 +632,9 @@ def attach_distribution_context(estimate: dict[str, object], distribution: dict[
   }
 
 
-def build_distribution_payload(data_dir: Path, stats: dict[str, object], boundary_path: Path) -> dict[str, object]:
-  tile_ids = discover_tile_ids(data_dir)
+def build_runtime_grid(data_dir: Path, boundary_path: Path) -> dict[str, object]:
+  selected_paths_by_sensor = selected_sensor_tile_paths(data_dir)
+  tile_ids = discover_tile_ids(data_dir, selected_paths_by_sensor)
   if not tile_ids:
     raise RuntimeError(f"No Black Marble tiles found under {data_dir}")
   country_geometry = load_country_geometry(boundary_path)
@@ -558,8 +642,8 @@ def build_distribution_payload(data_dir: Path, stats: dict[str, object], boundar
   parsed_tiles = [parse_tile_id(tile_id) for tile_id in tile_ids]
   horizontal_ids = sorted({horizontal for _, horizontal, _ in parsed_tiles})
   vertical_ids = sorted({vertical for _, _, vertical in parsed_tiles})
-  row_count = len(vertical_ids) * 2400
-  col_count = len(horizontal_ids) * 2400
+  row_count = len(vertical_ids) * TILE_SIZE_PX
+  col_count = len(horizontal_ids) * TILE_SIZE_PX
 
   horizontal_index = {value: index for index, value in enumerate(horizontal_ids)}
   vertical_index = {value: index for index, value in enumerate(vertical_ids)}
@@ -572,23 +656,30 @@ def build_distribution_payload(data_dir: Path, stats: dict[str, object], boundar
   valid_mask = np.zeros((row_count, col_count), dtype=bool)
 
   for tile_id, horizontal, vertical in parsed_tiles:
-    tile_row = vertical_index[vertical] * 2400
-    tile_col = horizontal_index[horizontal] * 2400
-    tile_slice = (slice(tile_row, tile_row + 2400), slice(tile_col, tile_col + 2400))
+    tile_row = vertical_index[vertical] * TILE_SIZE_PX
+    tile_col = horizontal_index[horizontal] * TILE_SIZE_PX
+    tile_slice = (slice(tile_row, tile_row + TILE_SIZE_PX), slice(tile_col, tile_col + TILE_SIZE_PX))
 
     sensor_radiance: list[np.ndarray] = []
     sensor_quality: list[np.ndarray] = []
     sensor_obs: list[np.ndarray] = []
     sensor_std: list[np.ndarray] = []
 
-    for sensor in ["VNP46A4", "VJ146A4"]:
+    for sensor in SENSORS:
+      selected_tile = selected_paths_by_sensor.get(sensor, {}).get(tile_id)
+      if selected_tile is None:
+        sensor_radiance.append(np.full((TILE_SIZE_PX, TILE_SIZE_PX), np.nan, dtype=np.float32))
+        sensor_quality.append(np.full((TILE_SIZE_PX, TILE_SIZE_PX), np.nan, dtype=np.float32))
+        sensor_obs.append(np.full((TILE_SIZE_PX, TILE_SIZE_PX), np.nan, dtype=np.float32))
+        sensor_std.append(np.full((TILE_SIZE_PX, TILE_SIZE_PX), np.nan, dtype=np.float32))
+        continue
       try:
-        _, file_handle = open_sensor_tile(data_dir, sensor, tile_id)
+        _, file_handle = open_sensor_tile(data_dir, sensor, tile_id, selected_paths_by_sensor.get(sensor))
       except FileNotFoundError:
-        sensor_radiance.append(np.full((2400, 2400), np.nan, dtype=np.float32))
-        sensor_quality.append(np.full((2400, 2400), np.nan, dtype=np.float32))
-        sensor_obs.append(np.full((2400, 2400), np.nan, dtype=np.float32))
-        sensor_std.append(np.full((2400, 2400), np.nan, dtype=np.float32))
+        sensor_radiance.append(np.full((TILE_SIZE_PX, TILE_SIZE_PX), np.nan, dtype=np.float32))
+        sensor_quality.append(np.full((TILE_SIZE_PX, TILE_SIZE_PX), np.nan, dtype=np.float32))
+        sensor_obs.append(np.full((TILE_SIZE_PX, TILE_SIZE_PX), np.nan, dtype=np.float32))
+        sensor_std.append(np.full((TILE_SIZE_PX, TILE_SIZE_PX), np.nan, dtype=np.float32))
         continue
 
       with file_handle:
@@ -623,7 +714,7 @@ def build_distribution_payload(data_dir: Path, stats: dict[str, object], boundar
     tile_observation = nanmean_stack(observation_stack)
     tile_std = nanmean_stack(std_stack)
     tile_valid = np.isfinite(tile_merged_radiance) & (tile_merged_radiance > 0)
-    tile_sensor_delta = np.zeros((2400, 2400), dtype=np.float32)
+    tile_sensor_delta = np.zeros((TILE_SIZE_PX, TILE_SIZE_PX), dtype=np.float32)
     both_valid = np.isfinite(radiance_stack[0]) & np.isfinite(radiance_stack[1])
     tile_sensor_delta[both_valid] = np.abs(radiance_stack[0][both_valid] - radiance_stack[1][both_valid]) / np.maximum(
       (radiance_stack[0][both_valid] + radiance_stack[1][both_valid]) / 2,
@@ -637,6 +728,34 @@ def build_distribution_payload(data_dir: Path, stats: dict[str, object], boundar
     std_median[tile_slice] = tile_std
     sensor_delta_ratio[tile_slice] = tile_sensor_delta
     valid_mask[tile_slice] = tile_valid
+
+  return {
+    "tile_ids": tile_ids,
+    "source_products": build_source_products(selected_paths_by_sensor),
+    "horizontal_ids": horizontal_ids,
+    "vertical_ids": vertical_ids,
+    "row_count": row_count,
+    "col_count": col_count,
+    "merged_radiance": merged_radiance,
+    "quality_good_fraction": quality_good_fraction,
+    "observation_median": observation_median,
+    "std_median": std_median,
+    "sensor_delta_ratio": sensor_delta_ratio,
+    "valid_mask": valid_mask,
+  }
+
+
+def build_distribution_payload(data_dir: Path, stats: dict[str, object], boundary_path: Path) -> dict[str, object]:
+  runtime_grid = build_runtime_grid(data_dir, boundary_path)
+  tile_ids = runtime_grid["tile_ids"]
+  row_count = runtime_grid["row_count"]
+  col_count = runtime_grid["col_count"]
+  merged_radiance = runtime_grid["merged_radiance"]
+  quality_good_fraction = runtime_grid["quality_good_fraction"]
+  observation_median = runtime_grid["observation_median"]
+  std_median = runtime_grid["std_median"]
+  sensor_delta_ratio = runtime_grid["sensor_delta_ratio"]
+  valid_mask = runtime_grid["valid_mask"]
 
   regional_mean = box_mean(np.nan_to_num(merged_radiance, nan=0.0), valid_mask, REGIONAL_RADIUS_PX)
   local_radiance = np.where(valid_mask, merged_radiance, np.nan)
@@ -700,6 +819,7 @@ def build_distribution_payload(data_dir: Path, stats: dict[str, object], boundar
   return {
     "generated_at": datetime.now(timezone.utc).isoformat(),
     "version": "2026-03-19-continuous-bortle-v2-korea-calibrated",
+    "source_products": runtime_grid["source_products"],
     "boundary": {
       "country": "Republic of Korea",
       "boundary_path": str(boundary_path),
@@ -709,6 +829,8 @@ def build_distribution_payload(data_dir: Path, stats: dict[str, object], boundar
       "tile_ids": tile_ids,
       "rows": row_count,
       "cols": col_count,
+      "pixels_per_degree": PIXELS_PER_DEGREE,
+      "tile_size_px": TILE_SIZE_PX,
       "regional_radius_px": REGIONAL_RADIUS_PX,
       "resolution_arcsec": 15,
     },
@@ -722,10 +844,322 @@ def build_distribution_payload(data_dir: Path, stats: dict[str, object], boundar
   }
 
 
+def build_runtime_artifact_payload(data_dir: Path, boundary_path: Path) -> dict[str, object]:
+  runtime_grid = build_runtime_grid(data_dir, boundary_path)
+  metadata = {
+    "generated_at": datetime.now(timezone.utc).isoformat(),
+    "version": RUNTIME_ARTIFACT_VERSION,
+    "source_products": runtime_grid["source_products"],
+    "boundary": {
+      "country": "Republic of Korea",
+      "boundary_path": str(boundary_path),
+      "boundary_source": "geoBoundaries gbOpen / Natural Earth",
+    },
+    "grid": {
+      "tile_ids": runtime_grid["tile_ids"],
+      "horizontal_ids": runtime_grid["horizontal_ids"],
+      "vertical_ids": runtime_grid["vertical_ids"],
+      "rows": runtime_grid["row_count"],
+      "cols": runtime_grid["col_count"],
+      "pixels_per_degree": PIXELS_PER_DEGREE,
+      "tile_size_px": TILE_SIZE_PX,
+      "regional_radius_px": REGIONAL_RADIUS_PX,
+      "resolution_arcsec": 15,
+    },
+  }
+  return {
+    "metadata": metadata,
+    "arrays": {
+      "merged_radiance": runtime_grid["merged_radiance"],
+      "quality_good_fraction": runtime_grid["quality_good_fraction"],
+      "observation_median": runtime_grid["observation_median"],
+      "std_median": runtime_grid["std_median"],
+      "sensor_delta_ratio": runtime_grid["sensor_delta_ratio"],
+      "valid_mask": runtime_grid["valid_mask"],
+    },
+  }
+
+
+def write_runtime_artifact(output: Path, payload: dict[str, object]) -> None:
+  metadata = payload["metadata"]
+  arrays = payload["arrays"]
+  output.parent.mkdir(parents=True, exist_ok=True)
+  np.savez_compressed(
+    output,
+    metadata_json=np.array(json.dumps(metadata)),
+    merged_radiance=arrays["merged_radiance"],
+    quality_good_fraction=arrays["quality_good_fraction"],
+    observation_median=arrays["observation_median"],
+    std_median=arrays["std_median"],
+    sensor_delta_ratio=arrays["sensor_delta_ratio"],
+    valid_mask=arrays["valid_mask"].astype(np.uint8),
+  )
+
+
+def load_runtime_artifact(artifact_path: Path) -> dict[str, object] | None:
+  if not artifact_path.exists():
+    return None
+
+  with np.load(artifact_path, allow_pickle=False) as artifact:
+    metadata = json.loads(artifact["metadata_json"].tolist())
+    return {
+      "path": str(artifact_path),
+      "metadata": metadata,
+      "merged_radiance": artifact["merged_radiance"].copy(),
+      "quality_good_fraction": artifact["quality_good_fraction"].copy(),
+      "observation_median": artifact["observation_median"].copy(),
+      "std_median": artifact["std_median"].copy(),
+      "sensor_delta_ratio": artifact["sensor_delta_ratio"].copy(),
+      "valid_mask": artifact["valid_mask"].astype(bool),
+    }
+
+
 def load_distribution(distribution_path: Path) -> dict[str, object] | None:
   if not distribution_path.exists():
     return None
   return json.loads(distribution_path.read_text(encoding="utf-8"))
+
+
+def runtime_artifact_row_col(runtime_artifact: dict[str, object], lat: float, lon: float) -> tuple[int, int, str]:
+  pixels_per_degree = int(runtime_artifact["metadata"]["grid"].get("pixels_per_degree", PIXELS_PER_DEGREE))
+  tile_size_px = int(runtime_artifact["metadata"]["grid"].get("tile_size_px", TILE_SIZE_PX))
+  horizontal = int(math.floor((lon + 180) / 10))
+  vertical = int(math.floor((90 - lat) / 10))
+  tile_id = f"h{horizontal:02d}v{vertical:02d}"
+
+  horizontal_ids = runtime_artifact["metadata"]["grid"]["horizontal_ids"]
+  vertical_ids = runtime_artifact["metadata"]["grid"]["vertical_ids"]
+  if horizontal not in horizontal_ids or vertical not in vertical_ids:
+    raise RuntimeError(f"Runtime artifact does not contain tile {tile_id}.")
+
+  tile_row = vertical_ids.index(vertical) * tile_size_px
+  tile_col = horizontal_ids.index(horizontal) * tile_size_px
+  north = 90.0 - vertical * 10.0
+  west = horizontal * 10.0 - 180.0
+  row_offset = min(max(int((north - lat) * pixels_per_degree), 0), tile_size_px - 1)
+  col_offset = min(max(int((lon - west) * pixels_per_degree), 0), tile_size_px - 1)
+  return tile_row + row_offset, tile_col + col_offset, tile_id
+
+
+def slices_for_runtime_artifact(runtime_artifact: dict[str, object], lat: float, lon: float, radius_km: float) -> tuple[slice, slice]:
+  row_center, col_center, _tile_id = runtime_artifact_row_col(runtime_artifact, lat, lon)
+  row_count = runtime_artifact["metadata"]["grid"]["rows"]
+  col_count = runtime_artifact["metadata"]["grid"]["cols"]
+  pixels_per_degree = int(runtime_artifact["metadata"]["grid"].get("pixels_per_degree", PIXELS_PER_DEGREE))
+
+  lat_radius = max(1, math.ceil(radius_km / (KM_PER_DEGREE / pixels_per_degree)))
+  lon_scale = max(math.cos(math.radians(lat)), 0.2)
+  lon_radius = max(1, math.ceil(radius_km / ((KM_PER_DEGREE * lon_scale) / pixels_per_degree)))
+
+  row_slice = slice(max(0, row_center - lat_radius), min(row_count, row_center + lat_radius + 1))
+  col_slice = slice(max(0, col_center - lon_radius), min(col_count, col_center + lon_radius + 1))
+  return row_slice, col_slice
+
+
+def compute_artifact_window_stats(
+  radiance: np.ndarray,
+  quality_good_fraction: np.ndarray,
+  observations: np.ndarray,
+  stddev: np.ndarray,
+  sensor_delta_ratio: np.ndarray,
+  valid_mask: np.ndarray,
+) -> dict[str, float | int | None]:
+  valid = np.isfinite(radiance) & (radiance > 0) & valid_mask
+  if not np.any(valid):
+    return {
+      "valid_pixel_count": 0,
+      "positive_pixel_count": 0,
+      "p25_radiance": None,
+      "median_radiance": None,
+      "p75_radiance": None,
+      "robust_radiance": None,
+      "glow_context_radiance": None,
+      "high_tail_skew_indicator": None,
+      "mean_radiance": None,
+      "quality_good_fraction": None,
+      "observation_median": None,
+      "std_median": None,
+      "sensor_delta_ratio_mean": None,
+    }
+
+  radiance_valid = radiance[valid]
+  positive = radiance_valid[radiance_valid > 0]
+  p25 = float(np.percentile(positive, 25)) if positive.size else 0.0
+  median = float(np.median(positive)) if positive.size else 0.0
+  p75 = float(np.percentile(positive, 75)) if positive.size else 0.0
+  mean_value = float(np.mean(radiance_valid))
+  mean_to_median_ratio = mean_value / max(median, RADIANCE_FLOOR)
+  p75_to_median_ratio = p75 / max(median, RADIANCE_FLOOR)
+  skew_indicator = clamp(
+    max(
+      (mean_to_median_ratio - 1.08) / 0.6,
+      (p75_to_median_ratio - 1.22) / 0.8,
+    ),
+    0.0,
+    1.0,
+  )
+  robust_radiance = median - 0.5 * skew_indicator * (median - p25)
+  glow_context_radiance = min(
+    mean_value,
+    median + (0.25 + 0.15 * skew_indicator) * max(p75 - median, 0.0),
+  )
+
+  quality_values = quality_good_fraction[valid]
+  observation_values = observations[valid]
+  std_values = stddev[valid]
+  sensor_delta_values = sensor_delta_ratio[valid]
+
+  return {
+    "valid_pixel_count": int(valid.sum()),
+    "positive_pixel_count": int(positive.size),
+    "p25_radiance": p25,
+    "median_radiance": median,
+    "p75_radiance": p75,
+    "robust_radiance": float(robust_radiance),
+    "glow_context_radiance": float(glow_context_radiance),
+    "high_tail_skew_indicator": float(skew_indicator),
+    "mean_radiance": mean_value,
+    "quality_good_fraction": float(np.nanmean(quality_values)) if quality_values.size else None,
+    "observation_median": float(np.nanmedian(observation_values)) if observation_values.size else None,
+    "std_median": float(np.nanmedian(std_values)) if std_values.size else None,
+    "sensor_delta_ratio_mean": float(np.nanmean(sensor_delta_values)) if sensor_delta_values.size else None,
+  }
+
+
+def sample_runtime_artifact(runtime_artifact: dict[str, object], lat: float, lon: float) -> dict[str, object]:
+  result: dict[str, object] = {}
+  merged_radiance = runtime_artifact["merged_radiance"]
+  quality_good_fraction = runtime_artifact["quality_good_fraction"]
+  observation_median = runtime_artifact["observation_median"]
+  std_median = runtime_artifact["std_median"]
+  sensor_delta_ratio = runtime_artifact["sensor_delta_ratio"]
+  valid_mask = runtime_artifact["valid_mask"]
+
+  for label, radius_km in [("local", 1.5), ("near_5km", 5.0), ("regional_20km", 20.0)]:
+    row_slice, col_slice = slices_for_runtime_artifact(runtime_artifact, lat, lon, radius_km)
+    result[label] = compute_artifact_window_stats(
+      merged_radiance[row_slice, col_slice],
+      quality_good_fraction[row_slice, col_slice],
+      observation_median[row_slice, col_slice],
+      std_median[row_slice, col_slice],
+      sensor_delta_ratio[row_slice, col_slice],
+      valid_mask[row_slice, col_slice],
+    )
+
+  center_row, center_col, tile_id = runtime_artifact_row_col(runtime_artifact, lat, lon)
+  result["tile"] = tile_id
+  result["center_pixel"] = {
+    "radiance": float(merged_radiance[center_row, center_col]),
+    "quality_good_fraction": float(quality_good_fraction[center_row, center_col])
+    if np.isfinite(quality_good_fraction[center_row, center_col])
+    else None,
+    "observation_median": float(observation_median[center_row, center_col]) if np.isfinite(observation_median[center_row, center_col]) else None,
+    "std_median": float(std_median[center_row, center_col]) if np.isfinite(std_median[center_row, center_col]) else None,
+    "sensor_delta_ratio": float(sensor_delta_ratio[center_row, center_col]) if np.isfinite(sensor_delta_ratio[center_row, center_col]) else None,
+    "valid": bool(valid_mask[center_row, center_col]),
+  }
+  return result
+
+
+def combine_runtime_artifact_sample(sample: dict[str, object]) -> dict[str, object]:
+  local_radiance = float(sample["local"]["robust_radiance"]) if sample["local"]["robust_radiance"] is not None else 0.0
+  near_radiance = (
+    float(sample["near_5km"]["glow_context_radiance"])
+    if sample["near_5km"]["glow_context_radiance"] is not None
+    else local_radiance
+  )
+  regional_radiance = (
+    float(sample["regional_20km"]["glow_context_radiance"])
+    if sample["regional_20km"]["glow_context_radiance"] is not None
+    else local_radiance
+  )
+  near_mean_radiance = float(sample["near_5km"]["mean_radiance"]) if sample["near_5km"]["mean_radiance"] is not None else near_radiance
+  regional_mean_radiance = (
+    float(sample["regional_20km"]["mean_radiance"])
+    if sample["regional_20km"]["mean_radiance"] is not None
+    else regional_radiance
+  )
+  quality_good_fraction = (
+    float(sample["local"]["quality_good_fraction"])
+    if sample["local"]["quality_good_fraction"] is not None
+    else None
+  )
+  observation_median = (
+    float(sample["local"]["observation_median"])
+    if sample["local"]["observation_median"] is not None
+    else None
+  )
+  std_value = float(sample["local"]["std_median"]) if sample["local"]["std_median"] is not None else None
+  local_high_tail_skew = (
+    float(sample["local"]["high_tail_skew_indicator"])
+    if sample["local"]["high_tail_skew_indicator"] is not None
+    else 0.0
+  )
+  sensor_delta = (
+    float(sample["local"]["sensor_delta_ratio_mean"])
+    if sample["local"]["sensor_delta_ratio_mean"] is not None
+    else float(sample["center_pixel"]["sensor_delta_ratio"] or 0.0)
+  )
+
+  variability_ratio = (std_value / max(local_radiance, RADIANCE_FLOOR)) if std_value is not None else 0.45
+  quality_penalty = clamp(1.0 - (quality_good_fraction if quality_good_fraction is not None else 0.75), 0.0, 1.0)
+  observation_penalty = clamp((6.0 - (observation_median if observation_median is not None else 3.0)) / 6.0, 0.0, 1.0)
+  variability_penalty = clamp((variability_ratio - 0.35) / 1.65, 0.0, 1.0)
+  sensor_penalty = clamp(sensor_delta / 0.5, 0.0, 1.0)
+
+  regional_ratio = regional_radiance / max(local_radiance, RADIANCE_FLOOR)
+  regional_penalty = clamp((regional_ratio - 1.0) / 2.0, 0.0, 1.0)
+  relative_uncertainty = clamp(
+    0.08
+    + 0.2 * sensor_penalty
+    + 0.14 * quality_penalty
+    + 0.12 * observation_penalty
+    + 0.16 * variability_penalty
+    + 0.08 * regional_penalty,
+    0.08,
+    0.75,
+  )
+
+  confidence = clamp(
+    0.95
+    - 0.55 * ((relative_uncertainty - 0.08) / 0.67)
+    - 0.12 * sensor_penalty
+    - 0.08 * quality_penalty,
+    0.25,
+    0.95,
+  )
+
+  if confidence >= 0.8:
+    confidence_label = "high"
+  elif confidence >= 0.6:
+    confidence_label = "medium"
+  else:
+    confidence_label = "low"
+
+  return {
+    "local_radiance": local_radiance,
+    "near_5km_mean_radiance": near_mean_radiance,
+    "regional_20km_mean_radiance": regional_mean_radiance,
+    "near_5km_glow_context_radiance": near_radiance,
+    "regional_20km_glow_context_radiance": regional_radiance,
+    "quality_good_fraction": quality_good_fraction,
+    "observation_median": observation_median,
+    "std_median": std_value,
+    "local_high_tail_skew": local_high_tail_skew,
+    "sensor_delta_ratio": sensor_delta,
+    "regional_ratio": regional_ratio,
+    "regional_ratio_basis": "regional_20km_glow_context_radiance / local_radiance",
+    "relative_uncertainty": relative_uncertainty,
+    "uncertainty_drivers": {
+      "sensor_disagreement": sensor_penalty,
+      "quality_penalty": quality_penalty,
+      "observation_penalty": observation_penalty,
+      "variability_penalty": variability_penalty,
+      "regional_glow_penalty": regional_penalty,
+    },
+    "confidence_score": confidence,
+    "confidence_label": confidence_label,
+  }
 
 def combine_sensor_samples(vnp: dict[str, object] | None, vj: dict[str, object] | None) -> dict[str, object]:
   available = [sample for sample in [vnp, vj] if sample is not None]
@@ -861,29 +1295,53 @@ def estimate_bortle(
   data_dir: Path,
   stats_path: Path,
   distribution_path: Path | None = None,
+  runtime_artifact_path: Path | None = DEFAULT_RUNTIME_ARTIFACT_PATH,
   boundary_path: Path = DEFAULT_BOUNDARY_PATH,
 ) -> dict[str, object]:
   stats = ensure_stats(stats_path, data_dir)
   tile_id = tile_id_for(lat, lon)
   sensor_samples: dict[str, object] = {}
-  country_geometry = load_country_geometry(boundary_path)
+  combined: dict[str, object] | None = None
+  runtime_artifact_error: Exception | None = None
 
-  for sensor in ["VNP46A4", "VJ146A4"]:
-    try:
-      path, file_handle = open_sensor_tile(data_dir, sensor, tile_id)
-    except FileNotFoundError:
-      continue
-    with file_handle:
-      sensor_samples[sensor] = {
-        "tile": tile_id,
-        "path": str(path),
-        "sample": sample_sensor(file_handle, lat, lon, country_geometry),
-      }
+  if runtime_artifact_path is not None:
+    runtime_artifact = load_runtime_artifact(runtime_artifact_path)
+    if runtime_artifact is not None:
+      try:
+        artifact_sample = sample_runtime_artifact(runtime_artifact, lat, lon)
+        combined = combine_runtime_artifact_sample(artifact_sample)
+        tile_id = artifact_sample["tile"]
+        sensor_samples["runtime_artifact"] = {
+          "tile": tile_id,
+          "path": runtime_artifact["path"],
+          "version": runtime_artifact["metadata"]["version"],
+          "sample": artifact_sample,
+        }
+      except RuntimeError as error:
+        runtime_artifact_error = error
 
-  combined = combine_sensor_samples(
-    sensor_samples.get("VNP46A4", {}).get("sample"),
-    sensor_samples.get("VJ146A4", {}).get("sample"),
-  )
+  if combined is None:
+    country_geometry = load_country_geometry(boundary_path)
+
+    for sensor in SENSORS:
+      try:
+        path, file_handle = open_sensor_tile(data_dir, sensor, tile_id)
+      except FileNotFoundError:
+        continue
+      with file_handle:
+        sensor_samples[sensor] = {
+          "tile": tile_id,
+          "path": str(path),
+          "sample": sample_sensor(file_handle, lat, lon, country_geometry),
+        }
+
+    combined = combine_sensor_samples(
+      sensor_samples.get("VNP46A4", {}).get("sample"),
+      sensor_samples.get("VJ146A4", {}).get("sample"),
+    )
+
+  if runtime_artifact_error is not None and not sensor_samples:
+    raise runtime_artifact_error
 
   local_radiance = combined["local_radiance"]
   percentile_center = estimate_percentile_from_radiance(local_radiance, stats)
@@ -1004,6 +1462,21 @@ def build_distribution_command(args: argparse.Namespace) -> int:
   return 0
 
 
+def build_runtime_artifact_command(args: argparse.Namespace) -> int:
+  payload = build_runtime_artifact_payload(Path(args.data_dir), Path(args.boundary))
+  output = Path(args.output)
+  write_runtime_artifact(output, payload)
+  print(json.dumps({
+    "ok": True,
+    "output": str(output),
+    "version": payload["metadata"]["version"],
+    "rows": payload["metadata"]["grid"]["rows"],
+    "cols": payload["metadata"]["grid"]["cols"],
+    "tile_count": len(payload["metadata"]["grid"]["tile_ids"]),
+  }))
+  return 0
+
+
 def sample_command(args: argparse.Namespace) -> int:
   payload = estimate_bortle(
     lat=args.lat,
@@ -1011,6 +1484,7 @@ def sample_command(args: argparse.Namespace) -> int:
     data_dir=Path(args.data_dir),
     stats_path=Path(args.stats),
     distribution_path=Path(args.distribution) if args.distribution else None,
+    runtime_artifact_path=Path(args.runtime_artifact) if args.runtime_artifact else None,
     boundary_path=Path(args.boundary),
   )
   print(json.dumps(payload, ensure_ascii=False, indent=2))
@@ -1034,10 +1508,17 @@ def main() -> int:
   distribution.add_argument("--boundary", default=str(DEFAULT_BOUNDARY_PATH))
   distribution.set_defaults(func=build_distribution_command)
 
+  runtime_artifact = subparsers.add_parser("build-runtime-artifact")
+  runtime_artifact.add_argument("--data-dir", default=str(DEFAULT_DATA_DIR))
+  runtime_artifact.add_argument("--output", default=str(DEFAULT_RUNTIME_ARTIFACT_PATH))
+  runtime_artifact.add_argument("--boundary", default=str(DEFAULT_BOUNDARY_PATH))
+  runtime_artifact.set_defaults(func=build_runtime_artifact_command)
+
   sample = subparsers.add_parser("sample")
   sample.add_argument("--data-dir", default=str(DEFAULT_DATA_DIR))
   sample.add_argument("--stats", default=str(DEFAULT_STATS_PATH))
   sample.add_argument("--distribution", default=str(DEFAULT_DISTRIBUTION_PATH))
+  sample.add_argument("--runtime-artifact", default=str(DEFAULT_RUNTIME_ARTIFACT_PATH))
   sample.add_argument("--boundary", default=str(DEFAULT_BOUNDARY_PATH))
   sample.add_argument("--lat", type=float, required=True)
   sample.add_argument("--lon", type=float, required=True)

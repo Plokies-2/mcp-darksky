@@ -1,6 +1,48 @@
 {
-  "generated_at": "2026-03-19T06:48:59.387698+00:00",
+  "generated_at": "2026-03-19T11:35:56.453511+00:00",
   "radiance_layer": "AllAngle_Composite_Snow_Free",
+  "source_products": {
+    "latest_product_year": 2025,
+    "source_years": [
+      2025
+    ],
+    "sensors": {
+      "VNP46A4": {
+        "tile_count": 2,
+        "tiles": [
+          {
+            "tile_id": "h30v05",
+            "product_year": 2025,
+            "day_of_year": 1,
+            "filename": "VNP46A4.A2025001.h30v05.002.2026077004206.h5"
+          },
+          {
+            "tile_id": "h31v05",
+            "product_year": 2025,
+            "day_of_year": 1,
+            "filename": "VNP46A4.A2025001.h31v05.002.2026077022316.h5"
+          }
+        ]
+      },
+      "VJ146A4": {
+        "tile_count": 2,
+        "tiles": [
+          {
+            "tile_id": "h30v05",
+            "product_year": 2025,
+            "day_of_year": 1,
+            "filename": "VJ146A4.A2025001.h30v05.002.2026072180152.h5"
+          },
+          {
+            "tile_id": "h31v05",
+            "product_year": 2025,
+            "day_of_year": 1,
+            "filename": "VJ146A4.A2025001.h31v05.002.2026072180318.h5"
+          }
+        ]
+      }
+    }
+  },
   "boundary": {
     "country": "Republic of Korea",
     "boundary_path": "C:\\Users\\song7\\Desktop\\school\\2026-1\\projects\\mcp_darksky\\data\\south-korea-boundary.geojson",

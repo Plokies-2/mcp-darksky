@@ -3,3 +3,14 @@ node_modules/
 data/VNP46A4/
 data/VJ146A4/
 scripts/__pycache__/
+__pycache__/
+*.pyc
+output-http*.log
+output-http*.err
+home-preview.html
+install-preview.html
+test-download.bin
+vnp2024.html
+vnp2025.html
+vj2024.html
+vj2025.html
