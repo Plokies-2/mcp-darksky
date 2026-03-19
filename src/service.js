@@ -2,6 +2,7 @@ import { z } from "zod";
 import { fetchForecastBundle } from "./open-meteo.js";
 import { getEstimatedLightPollution } from "./light-pollution.js";
 import { getLightPollutionMethodology } from "./light-pollution-methodology.js";
+import { resolveObservationIntent } from "./observation-intent.js";
 import { resolvePlaceQuery } from "./kakao-local.js";
 import { generateNightSkyReport } from "./scoring.js";
 import { resolveTargetInput } from "./targets.js";
@@ -66,6 +67,42 @@ function normalizeScoreMode(value) {
   return aliases[normalized] ?? normalized;
 }
 
+function resolveScoringIntent(parsed) {
+  const intent = resolveObservationIntent({
+    requestedMode: parsed.mode,
+    shootingGoal: parsed.shooting_goal,
+    target: parsed.target,
+  });
+  const resolvedTarget = intent.target ? resolveTargetInput(intent.target) : null;
+
+  return {
+    intent,
+    resolvedTarget,
+    effectiveMode: intent.resolved_mode,
+  };
+}
+
+function attachRequestContext(report, intent, resolvedTarget) {
+  report.request_context = {
+    requested_mode: intent.requested_mode,
+    resolved_mode: intent.resolved_mode,
+    resolution_reason: intent.resolution_reason,
+    shooting_goal: intent.shooting_goal,
+    intent_tags: intent.intent_tags,
+    target_inferred_from_goal: intent.target_inferred_from_goal,
+    advanced_tip: intent.advanced_tip,
+    resolved_target: resolvedTarget
+      ? {
+          name: resolvedTarget.name,
+          category: resolvedTarget.category ?? null,
+          source: resolvedTarget.source ?? null,
+        }
+      : null,
+  };
+
+  return report;
+}
+
 export const lightPollutionInputSchema = z
   .object({
     latitude: z.number().min(33).max(39.5).optional(),
@@ -103,6 +140,7 @@ export const scoreInputSchema = z
     location_name: z.string().optional(),
     timezone: z.string().default("Asia/Seoul"),
     mode: scoreModeSchema.default("general"),
+    shooting_goal: z.string().min(2).max(200).optional(),
     site_profile: siteProfileSchema,
     target: targetSchema,
   })
@@ -136,7 +174,9 @@ export const outlookInputSchema = z
     location_name: z.string().optional(),
     timezone: z.string().default("Asia/Seoul"),
     mode: scoreModeSchema.default("general"),
+    shooting_goal: z.string().min(2).max(200).optional(),
     site_profile: siteProfileSchema,
+    target: targetSchema,
   })
   .superRefine((value, ctx) => {
     const hasAnyCoordinate = value.latitude !== undefined || value.longitude !== undefined;
@@ -173,6 +213,7 @@ const querySchema = z
       .pipe(scoreModeSchema)
       .optional()
       .default("general"),
+    shooting_goal: z.string().min(2).max(200).optional(),
     bortle_class: z.coerce.number().int().min(1).max(9).optional(),
     elevation_m: z.coerce.number().min(-100).max(9000).optional(),
     target_name: z.string().min(2).optional(),
@@ -258,8 +299,13 @@ const outlookQuerySchema = z
       .pipe(scoreModeSchema)
       .optional()
       .default("general"),
+    shooting_goal: z.string().min(2).max(200).optional(),
     bortle_class: z.coerce.number().int().min(1).max(9).optional(),
     elevation_m: z.coerce.number().min(-100).max(9000).optional(),
+    target_name: z.string().min(2).optional(),
+    target_ra_hours: z.coerce.number().min(0).max(24).optional(),
+    target_dec_degrees: z.coerce.number().min(-90).max(90).optional(),
+    target_category: z.string().optional(),
     near_water: z
       .enum(["true", "false", "1", "0"])
       .optional()
@@ -284,6 +330,17 @@ const outlookQuerySchema = z
         message: "Either latitude/longitude or place_query must be provided.",
       });
     }
+
+    const hasAnyTargetCoordinate = value.target_ra_hours !== undefined || value.target_dec_degrees !== undefined;
+    const hasTargetCoordinates = value.target_ra_hours !== undefined && value.target_dec_degrees !== undefined;
+
+    if (hasAnyTargetCoordinate && !hasTargetCoordinates) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["target_ra_hours"],
+        message: "target_ra_hours and target_dec_degrees must be provided together.",
+      });
+    }
   });
 
 export function parseScoreQuery(query) {
@@ -297,6 +354,7 @@ export function parseScoreQuery(query) {
     location_name: parsed.location_name,
     timezone: parsed.timezone,
     mode: parsed.mode,
+    shooting_goal: parsed.shooting_goal,
     site_profile: {
       bortle_class: parsed.bortle_class,
       elevation_m: parsed.elevation_m,
@@ -336,11 +394,21 @@ export function parseOutlookQuery(query) {
     location_name: parsed.location_name,
     timezone: parsed.timezone,
     mode: parsed.mode,
+    shooting_goal: parsed.shooting_goal,
     site_profile: {
       bortle_class: parsed.bortle_class,
       elevation_m: parsed.elevation_m,
       near_water: parsed.near_water,
     },
+    target:
+      parsed.target_name || parsed.target_ra_hours !== undefined
+        ? {
+            name: parsed.target_name,
+            ra_hours: parsed.target_ra_hours,
+            dec_degrees: parsed.target_dec_degrees,
+            category: parsed.target_category,
+          }
+        : undefined,
   };
 }
 
@@ -433,6 +501,7 @@ function buildOutlookBlocks(hourlyConditions) {
 }
 
 function buildDistantFallbackPayload(parsed, publicBaseUrl = null) {
+  const { intent } = resolveScoringIntent(parsed);
   const detailPolicy = getForecastDetailPolicy(parsed.date, parsed.timezone);
   const hasSiteProfile =
     parsed.site_profile?.bortle_class !== undefined ||
@@ -441,12 +510,14 @@ function buildDistantFallbackPayload(parsed, publicBaseUrl = null) {
   const recommendedInput = {
     date: parsed.date,
     timezone: parsed.timezone,
-    mode: parsed.mode,
+    mode: intent.resolved_mode,
     ...(parsed.latitude !== undefined && parsed.longitude !== undefined
       ? { latitude: parsed.latitude, longitude: parsed.longitude }
       : { place_query: parsed.place_query }),
     ...(parsed.location_name ? { location_name: parsed.location_name } : {}),
+    ...(parsed.shooting_goal ? { shooting_goal: parsed.shooting_goal } : {}),
     ...(hasSiteProfile ? { site_profile: parsed.site_profile } : {}),
+    ...(intent.target ? { target: intent.target } : {}),
   };
 
   const fallback = {
@@ -463,7 +534,7 @@ function buildDistantFallbackPayload(parsed, publicBaseUrl = null) {
     const params = new URLSearchParams({
       date: parsed.date,
       timezone: parsed.timezone,
-      mode: parsed.mode,
+      mode: intent.resolved_mode,
     });
     if (parsed.latitude !== undefined && parsed.longitude !== undefined) {
       params.set("latitude", String(parsed.latitude));
@@ -475,6 +546,9 @@ function buildDistantFallbackPayload(parsed, publicBaseUrl = null) {
     if (parsed.location_name) {
       params.set("location_name", parsed.location_name);
     }
+    if (parsed.shooting_goal) {
+      params.set("shooting_goal", parsed.shooting_goal);
+    }
     if (parsed.site_profile?.bortle_class !== undefined) {
       params.set("bortle_class", String(parsed.site_profile.bortle_class));
     }
@@ -483,6 +557,18 @@ function buildDistantFallbackPayload(parsed, publicBaseUrl = null) {
     }
     if (parsed.site_profile?.near_water !== undefined) {
       params.set("near_water", String(parsed.site_profile.near_water));
+    }
+    if (intent.target?.name) {
+      params.set("target_name", intent.target.name);
+    }
+    if (intent.target?.ra_hours !== undefined) {
+      params.set("target_ra_hours", String(intent.target.ra_hours));
+    }
+    if (intent.target?.dec_degrees !== undefined) {
+      params.set("target_dec_degrees", String(intent.target.dec_degrees));
+    }
+    if (intent.target?.category) {
+      params.set("target_category", intent.target.category);
     }
     fallback.recommended_api_url = `${publicBaseUrl}/api/score-outlook?${params.toString()}`;
   }
@@ -555,6 +641,7 @@ export function getLightPollutionMethodologyReport() {
 
 export async function getNightSkyScoreReport(input) {
   const parsed = scoreInputSchema.parse(input);
+  const { intent, resolvedTarget, effectiveMode } = resolveScoringIntent(parsed);
   validateForecastDate(parsed.date, parsed.timezone);
   const detailPolicy = getForecastDetailPolicy(parsed.date, parsed.timezone);
 
@@ -563,7 +650,6 @@ export async function getNightSkyScoreReport(input) {
   }
 
   const observationPoint = await resolveObservationPoint(parsed, input.kakaoRestApiKey);
-  const resolvedTarget = parsed.target ? resolveTargetInput(parsed.target) : null;
   let lightPollutionEstimate = null;
   try {
     lightPollutionEstimate = await getEstimatedLightPollution({
@@ -603,10 +689,11 @@ export async function getNightSkyScoreReport(input) {
       elevationM: parsed.site_profile?.elevation_m,
       nearWater: parsed.site_profile?.near_water,
     },
-    mode: parsed.mode,
+    mode: effectiveMode,
     target: resolvedTarget,
   });
   report.detail_policy = detailPolicy;
+  attachRequestContext(report, intent, resolvedTarget);
 
   if (observationPoint.resolvedPlace) {
     report.location.resolved_from = observationPoint.resolvedFrom;
@@ -624,6 +711,7 @@ export async function getNightSkyScoreReport(input) {
 
 export async function getNightSkyOutlookReport(input) {
   const parsed = outlookInputSchema.parse(input);
+  const { intent, resolvedTarget, effectiveMode } = resolveScoringIntent(parsed);
   validateForecastDate(parsed.date, parsed.timezone);
   const detailPolicy = getForecastDetailPolicy(parsed.date, parsed.timezone);
   const observationPoint = await resolveObservationPoint(parsed, input.kakaoRestApiKey);
@@ -668,7 +756,8 @@ export async function getNightSkyOutlookReport(input) {
       elevationM: parsed.site_profile?.elevation_m,
       nearWater: parsed.site_profile?.near_water,
     },
-    mode: parsed.mode,
+    mode: effectiveMode,
+    target: resolvedTarget,
   });
 
   const hourlyOutlookConditions = detailedReport.score_curve.map((hour) => {
@@ -722,6 +811,7 @@ export async function getNightSkyOutlookReport(input) {
     ],
     source_attribution: detailedReport.source_attribution,
   };
+  attachRequestContext(report, intent, resolvedTarget);
 
   if (observationPoint.resolvedPlace) {
     report.location.resolved_from = observationPoint.resolvedFrom;
@@ -741,13 +831,17 @@ export function buildPromptText({ publicBaseUrl }) {
   return [
     "당신은 밤하늘 촬영 조건을 해설하는 도우미입니다.",
     `필요하면 ${publicBaseUrl}/api/score 엔드포인트에서 JSON 결과를 읽어오세요.`,
-    "사용자가 초보자일 수도 있으므로 먼저 오늘 출동해도 되는지부터 분명하게 말해주세요.",
-    "다음 순서로 짧고 분명하게 설명해주세요.",
-    "1. 오늘 밤 가장 좋은 시간대",
-    "2. 가장 큰 감점 요인 두 가지",
-    "3. 결로, 월광, 미세먼지, 바람 중 주의점",
-    "4. 초보자가 시도해도 되는지 여부",
-    "JSON의 scores, derived_recommendations, risk_flags, hourly_conditions를 우선 해석해주세요.",
+    "응답은 기본적으로 4~6줄 안팎으로 짧게 유지하고, 사용자가 더 자세한 설명을 원할 때만 확장하세요.",
+    "사용자가 묻는 천체, 시간대, 촬영 목적을 먼저 확인하고 그 요청이 best_window 또는 outlook block과 얼마나 맞는지 간략히 비교하세요.",
+    "특히 shooting_goal, request_context.resolved_mode, astronomy_context.target 이 있으면 그 목적에 맞는 판단을 우선하세요.",
+    "다음 순서로 간략히 설명해주세요.",
+    "1. 핵심 변수",
+    "2. 결론",
+    "3. 요청 시점 또는 타깃 비교",
+    "4. 기타 변수 요약",
+    "5. 추천 시간",
+    "필터나 고급 장비 조언이 필요할 때만 한 줄 덧붙이고, 반드시 '~가 있다면 ~하세요'처럼 초보자도 무시할 수 있게 표현하세요.",
+    "JSON의 request_context, scores, derived_recommendations, risk_flags, hourly_conditions를 우선 해석해주세요.",
     "좌표 대신 place_query가 있으면 한국 장소명 검색 결과를 기준으로 설명해주세요.",
   ].join("\n");
 }

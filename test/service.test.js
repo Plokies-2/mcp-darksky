@@ -29,6 +29,7 @@ test("parseScoreQuery converts HTTP query values into score input", () => {
     timezone: "Asia/Seoul",
     location_name: "Busan",
     mode: "general",
+    shooting_goal: undefined,
     site_profile: {
       bortle_class: 4,
       elevation_m: 120,
@@ -54,6 +55,7 @@ test("parseScoreQuery accepts place_query without coordinates", () => {
     timezone: "Asia/Seoul",
     location_name: undefined,
     mode: "general",
+    shooting_goal: undefined,
     site_profile: {
       bortle_class: 3,
       elevation_m: undefined,
@@ -82,6 +84,7 @@ test("parseScoreQuery accepts target name and custom coordinates", () => {
     timezone: "Asia/Seoul",
     location_name: undefined,
     mode: "general",
+    shooting_goal: undefined,
     site_profile: {
       bortle_class: undefined,
       elevation_m: undefined,
@@ -133,12 +136,44 @@ test("parseOutlookQuery accepts simplified distant-date input", () => {
     location_name: undefined,
     timezone: "Asia/Seoul",
     mode: "wide_field_milky_way",
+    shooting_goal: undefined,
     site_profile: {
       bortle_class: 3,
       elevation_m: undefined,
       near_water: undefined,
     },
+    target: undefined,
   });
+});
+
+test("parseScoreQuery carries shooting_goal for intent-aware routing", () => {
+  const parsed = parseScoreQuery({
+    latitude: "37.62",
+    longitude: "128.73",
+    date: "2026-03-20",
+    shooting_goal: "은하수 광각 촬영",
+  });
+
+  assert.equal(parsed.shooting_goal, "은하수 광각 촬영");
+  assert.equal(parsed.mode, "general");
+});
+
+test("parseOutlookQuery accepts target and shooting_goal together", () => {
+  const parsed = parseOutlookQuery({
+    place_query: "안반데기",
+    date: "2026-03-26",
+    shooting_goal: "오리온 성운 협대역",
+    target_name: "Orion Nebula",
+    target_category: "deep_sky",
+  });
+
+  assert.deepEqual(parsed.target, {
+    name: "Orion Nebula",
+    ra_hours: undefined,
+    dec_degrees: undefined,
+    category: "deep_sky",
+  });
+  assert.equal(parsed.shooting_goal, "오리온 성운 협대역");
 });
 
 test("getForecastDetailPolicy downgrades after full-detail window", () => {
@@ -168,12 +203,28 @@ test("getNightSkyScoreReport returns fallback payload for distant dates", async 
   assert.equal(report.detail_policy.detail_level, "reduced");
 });
 
+test("getNightSkyScoreReport resolves purpose-fit mode for distant-date fallback payloads", async () => {
+  const report = await getNightSkyScoreReport({
+    latitude: 37.6229,
+    longitude: 128.7391,
+    date: "2026-03-26",
+    timezone: "Asia/Seoul",
+    shooting_goal: "별궤적 촬영",
+    publicBaseUrl: "https://darksky.example.com",
+  });
+
+  assert.equal(report.recommended_input.mode, "star_trail");
+  assert.match(report.recommended_api_url, /mode=star_trail/);
+  assert.match(report.recommended_api_url, /shooting_goal=/);
+});
+
 test("buildPromptText references JSON API entrypoint", () => {
   const promptText = buildPromptText({
     publicBaseUrl: "https://darksky.example.com",
   });
 
   assert.match(promptText, /https:\/\/darksky\.example\.com\/api\/score/);
-  assert.match(promptText, /scores, derived_recommendations, risk_flags/);
+  assert.match(promptText, /request_context, scores, derived_recommendations, risk_flags/);
   assert.match(promptText, /place_query/);
+  assert.match(promptText, /shooting_goal/);
 });

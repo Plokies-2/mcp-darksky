@@ -28,7 +28,7 @@ async function ensureRuntimeArtifact() {
   }
 
   if (!runtimeArtifactUrl) {
-    console.warn("[boot] BLACK_MARBLE_RUNTIME_ARTIFACT_URL is unset; NASA estimation will fall back to local tiles or remain unavailable.");
+    console.warn("[boot] BLACK_MARBLE_RUNTIME_ARTIFACT_URL is unset; Black Marble estimation will remain unavailable until a runtime artifact is present.");
     return;
   }
 

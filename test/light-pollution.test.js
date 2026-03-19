@@ -1,6 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,8 +14,7 @@ const runtimeArtifactPath = path.join(projectRoot, "test", "fixtures", "black-ma
 const vnpDir = path.join(projectRoot, "data", "VNP46A4");
 const vjDir = path.join(projectRoot, "data", "VJ146A4");
 const hasBlackMarbleData = fs.existsSync(vnpDir) && fs.existsSync(vjDir);
-const hasPythonWithNumpy = spawnSync("python", ["-c", "import numpy"], { stdio: "ignore" }).status === 0;
-const hasRuntimeArtifactFixture = hasPythonWithNumpy && fs.existsSync(runtimeArtifactPath);
+const hasRuntimeArtifactFixture = fs.existsSync(runtimeArtifactPath);
 
 function buildHour(time, overrides = {}) {
   return {
@@ -84,6 +82,19 @@ test("runtime artifact estimate separates Seoul from a dark mountain site", { sk
   assert.ok(seoul.local_radiance > anbandegi.local_radiance);
   assert.ok(seoul.estimated_bortle_range.low <= seoul.estimated_bortle_center);
   assert.ok(seoul.estimated_bortle_range.high >= seoul.estimated_bortle_center);
+});
+
+test("runtime artifact estimation works without any Python runtime dependency", { skip: !hasRuntimeArtifactFixture }, async () => {
+  clearLightPollutionCache();
+
+  const seoul = await getEstimatedLightPollution({
+    latitude: 37.5665,
+    longitude: 126.9780,
+    runtimeArtifactPath,
+  });
+
+  assert.equal(seoul.sensor_samples.runtime_artifact.version, "test-fixture-runtime-artifact-v1");
+  assert.ok(typeof seoul.estimated_bortle_center === "number");
 });
 
 test("light pollution estimate includes Korea-wide percentile context when distribution data exists", {

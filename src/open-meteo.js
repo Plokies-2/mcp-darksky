@@ -35,6 +35,7 @@ const AIR_HOURLY_PARAMS = [
 
 const RESPONSE_CACHE_TTL_MS = 15 * 60 * 1000;
 const responseCache = new Map();
+let openMeteoDispatcherPromise;
 
 function buildUrl(base, params) {
   const url = new URL(base);
@@ -46,27 +47,52 @@ function buildUrl(base, params) {
   return url;
 }
 
-async function fetchJson(url) {
+async function getOpenMeteoDispatcher() {
+  if (typeof process?.release?.name !== "string" || process.release.name !== "node") {
+    return null;
+  }
+
+  if (!openMeteoDispatcherPromise) {
+    openMeteoDispatcherPromise = import("undici")
+      .then(({ Agent }) => new Agent({
+        connect: {
+          family: 4,
+        },
+      }))
+      .catch(() => null);
+  }
+
+  return openMeteoDispatcherPromise;
+}
+
+async function fetchJson(url, { fetchImpl = fetch } = {}) {
   const cacheKey = url.toString();
   const cached = responseCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
     return cached.payload;
   }
 
+  const fetchOptionsBase = {
+    headers: {
+      "User-Agent": "mcp-darksky/0.1.0",
+    },
+  };
+
   try {
-    const response = await fetchWithRetries(url, {
+    const dispatcher = await getOpenMeteoDispatcher();
+    const primaryResponse = await fetchWithRetries(url, {
       label: `Open-Meteo request to ${url.hostname}`,
+      fetchImpl,
       fetchOptions: {
-        headers: {
-          "User-Agent": "mcp-darksky/0.1.0",
-        },
+        ...fetchOptionsBase,
+        ...(dispatcher ? { dispatcher } : {}),
       },
     });
-    if (!response.ok) {
-      throw new Error(`Open-Meteo request failed with ${response.status}: ${response.statusText}`);
+    if (!primaryResponse.ok) {
+      throw new Error(`Open-Meteo request failed with ${primaryResponse.status}: ${primaryResponse.statusText}`);
     }
 
-    const payload = await response.json();
+    const payload = await primaryResponse.json();
     responseCache.set(cacheKey, {
       expiresAt: Date.now() + RESPONSE_CACHE_TTL_MS,
       payload,
@@ -103,6 +129,7 @@ export async function fetchForecastBundle({
   endDate,
   timezone = "Asia/Seoul",
   includeAirQuality = true,
+  fetchImpl = fetch,
 }) {
   const commonParams = {
     latitude,
@@ -125,8 +152,8 @@ export async function fetchForecastBundle({
     : null;
 
   const [weatherData, airData] = await Promise.all([
-    fetchJson(weatherUrl),
-    airUrl ? fetchJson(airUrl) : Promise.resolve(null),
+    fetchJson(weatherUrl, { fetchImpl }),
+    airUrl ? fetchJson(airUrl, { fetchImpl }) : Promise.resolve(null),
   ]);
 
   if (!weatherData.hourly?.time?.length) {
@@ -134,7 +161,7 @@ export async function fetchForecastBundle({
   }
 
   const weatherMap = buildHourlyMap(weatherData.hourly);
-  const airMap = airData.hourly?.time?.length ? buildHourlyMap(airData.hourly) : new Map();
+  const airMap = airData?.hourly?.time?.length ? buildHourlyMap(airData.hourly) : new Map();
 
   const hourly = weatherData.hourly.time.map((time) => ({
     time,
@@ -150,7 +177,7 @@ export async function fetchForecastBundle({
         provider: "Open-Meteo Forecast API",
         url: weatherUrl.toString(),
       },
-      ...(airUrl
+      ...(airUrl && airData
         ? [
             {
               provider: "Open-Meteo Air Quality API",
@@ -159,6 +186,6 @@ export async function fetchForecastBundle({
           ]
         : []),
     ],
-    airQualityIncluded: Boolean(airUrl),
+    airQualityIncluded: Boolean(airUrl && airData),
   };
 }

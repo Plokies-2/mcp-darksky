@@ -1,4 +1,4 @@
-import { getSuggestedForecastDate } from "./service.js";
+﻿import { getSuggestedForecastDate } from "./service.js";
 
 function buildSharedHead({ title }) {
   return `
@@ -702,6 +702,210 @@ function buildSharedHead({ title }) {
         transform: translateY(0);
       }
 
+      .details-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 40;
+        display: block;
+        padding: 0;
+        background:
+          radial-gradient(circle at top right, rgba(167, 184, 255, 0.16), transparent 20%),
+          linear-gradient(180deg, rgba(3, 5, 8, 0.92), rgba(3, 5, 8, 0.96));
+        backdrop-filter: blur(14px);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 180ms ease;
+      }
+
+      .details-overlay.is-open {
+        opacity: 1;
+        pointer-events: auto;
+      }
+
+      .details-panel {
+        width: 100vw;
+        height: 100vh;
+        max-height: 100vh;
+        overflow: auto;
+        border-radius: 0;
+        border: none;
+        background:
+          radial-gradient(circle at top right, rgba(167, 184, 255, 0.12), transparent 24%),
+          radial-gradient(circle at 20% 18%, rgba(143, 175, 255, 0.1), transparent 26%),
+          linear-gradient(180deg, rgba(10, 16, 32, 0.98), rgba(6, 11, 21, 0.98));
+        box-shadow: none;
+        transform: translateY(12px);
+        transition: transform 220ms ease;
+      }
+
+      .details-overlay.is-open .details-panel {
+        transform: translateY(0) scale(1);
+      }
+
+      .details-panel::-webkit-scrollbar {
+        width: 10px;
+      }
+
+      .details-panel::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.16);
+        border-radius: 999px;
+      }
+
+      .details-header {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 26px 28px 18px;
+        background: linear-gradient(180deg, rgba(8, 13, 24, 0.96), rgba(8, 13, 24, 0.78));
+        backdrop-filter: blur(12px);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      }
+
+      .details-header h2 {
+        margin: 8px 0 8px;
+        font-size: clamp(28px, 4vw, 42px);
+        line-height: 1.06;
+        letter-spacing: -0.04em;
+      }
+
+      .details-header p {
+        margin: 0;
+        max-width: 760px;
+        color: var(--muted);
+        font-size: 16px;
+        line-height: 1.65;
+      }
+
+      .details-close {
+        width: 44px;
+        min-width: 44px;
+        height: 44px;
+        padding: 0;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: rgba(255, 255, 255, 0.04);
+        color: var(--text);
+        font-size: 18px;
+      }
+
+      .details-content {
+        display: grid;
+        gap: 18px;
+        width: var(--content-width);
+        margin: 0 auto;
+        padding: 22px 0 40px;
+      }
+
+      .details-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+      }
+
+      .details-card {
+        padding: 22px;
+        border-radius: 24px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.03));
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+      }
+
+      .details-card h3 {
+        margin: 8px 0 10px;
+        font-size: 22px;
+        letter-spacing: -0.03em;
+      }
+
+      .details-card p {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.68;
+        font-size: 15px;
+      }
+
+      .details-card ul {
+        margin: 14px 0 0;
+        padding-left: 18px;
+        color: var(--muted-strong);
+        display: grid;
+        gap: 10px;
+        line-height: 1.58;
+      }
+
+      .details-kicker {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--accent-green);
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+
+      .details-kicker::before {
+        content: "";
+        width: 6px;
+        height: 6px;
+        border-radius: 999px;
+        background: currentColor;
+        opacity: 0.7;
+      }
+
+      .details-wide {
+        grid-column: 1 / -1;
+      }
+
+      .formula-block {
+        margin-top: 16px;
+        padding: 18px 20px;
+        border-radius: 20px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(255, 255, 255, 0.03);
+        display: grid;
+        gap: 10px;
+      }
+
+      .formula-block code {
+        display: block;
+        font-family: "SF Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+        font-size: 13px;
+        color: var(--text);
+        white-space: pre-wrap;
+        word-break: break-word;
+        line-height: 1.7;
+      }
+
+      .details-meta {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 16px;
+      }
+
+      .details-meta .panel {
+        padding: 14px 16px;
+        border-radius: 18px;
+      }
+
+      .details-meta strong {
+        display: block;
+        margin-bottom: 6px;
+        font-size: 13px;
+        color: var(--muted-strong);
+      }
+
+      .details-meta span {
+        display: block;
+        font-size: 14px;
+        line-height: 1.5;
+        color: var(--muted);
+      }
+
       :focus-visible {
         outline: 2px solid rgba(153, 205, 255, 0.9);
         outline-offset: 3px;
@@ -722,6 +926,11 @@ function buildSharedHead({ title }) {
 
         .hero-card {
           padding: 22px;
+        }
+
+        .details-grid,
+        .details-meta {
+          grid-template-columns: 1fr;
         }
       }
 
@@ -750,6 +959,22 @@ function buildSharedHead({ title }) {
 
         .step {
           grid-template-columns: 1fr;
+        }
+
+        .details-overlay {
+          padding: 0;
+        }
+
+        .details-panel {
+          width: 100vw;
+          height: 100vh;
+          max-height: 100vh;
+        }
+
+        .details-header,
+        .details-content {
+          padding-left: 18px;
+          padding-right: 18px;
         }
       }
 
@@ -793,6 +1018,60 @@ function buildSharedScript() {
           button.addEventListener("click", () => {
             const target = document.querySelector(button.getAttribute("data-copy"));
             copyText(target?.value ?? target?.textContent ?? "");
+          });
+        });
+
+        function setPanelState(id, nextState) {
+          const panel = document.getElementById(id);
+          if (!panel) {
+            return;
+          }
+
+          panel.classList.toggle("is-open", nextState);
+          panel.setAttribute("aria-hidden", nextState ? "false" : "true");
+          document.body.style.overflow = nextState ? "hidden" : "";
+        }
+
+        document.querySelectorAll(".details-overlay").forEach((panel) => {
+          setPanelState(panel.id, false);
+        });
+
+        document.querySelectorAll("[data-open-panel]").forEach((button) => {
+          button.addEventListener("click", () => {
+            setPanelState(button.getAttribute("data-open-panel"), true);
+          });
+        });
+
+        document.querySelectorAll("[data-close-panel]").forEach((button) => {
+          button.addEventListener("click", () => {
+            const targetId = button.getAttribute("data-close-panel");
+            if (targetId) {
+              setPanelState(targetId, false);
+              return;
+            }
+
+            const panel = button.closest(".details-overlay");
+            if (panel?.id) {
+              setPanelState(panel.id, false);
+            }
+          });
+        });
+
+        document.querySelectorAll(".details-overlay").forEach((panel) => {
+          panel.addEventListener("click", (event) => {
+            if (event.target === panel) {
+              setPanelState(panel.id, false);
+            }
+          });
+        });
+
+        document.addEventListener("keydown", (event) => {
+          if (event.key !== "Escape") {
+            return;
+          }
+
+          document.querySelectorAll(".details-overlay.is-open").forEach((panel) => {
+            setPanelState(panel.id, false);
           });
         });
 
@@ -897,7 +1176,6 @@ export function buildInstallPage({ publicBaseUrl }) {
     `${publicBaseUrl}/api/score?latitude=37.6229&longitude=128.7391&date=${sampleDate}&mode=wide_field_milky_way`;
   const placeApiExample =
     `${publicBaseUrl}/api/score?place_query=%EC%95%88%EB%B0%98%EB%8D%B0%EA%B8%B0%EB%A7%88%EC%9D%84&date=${sampleDate}&mode=wide_field_milky_way`;
-  const promptPage = `${publicBaseUrl}/prompt`;
   const outlookExample =
     `${publicBaseUrl}/api/score-outlook?place_query=%EC%95%88%EB%B0%98%EB%8D%B0%EA%B8%B0%EB%A7%88%EC%9D%84&date=2026-03-28&mode=wide_field_milky_way`;
 
@@ -914,16 +1192,16 @@ export function buildInstallPage({ publicBaseUrl }) {
           <div class="hero-copy">
             <h1>AI와 함께<br />오늘 밤 가장 알맞은<br />타이밍을 찾으세요.</h1>
             <p class="hero-subtitle">
-              <strong>mcp-darksky</strong>는 구름, 달빛, 광해, 대기질 등 필요한 모든 요소를 한 번에 점수화해
-              <strong>그 날의 가능성과</strong>와 <strong>시간대별 가능성</strong>까지 바로 정리합니다.
+              <strong>mcp-darksky</strong>는 구름, 월광, 광해, 대기질 같은 핵심 요소를 한 번에 모아
+              <strong>그 날의 가능성</strong>과 <strong>시간대별 점수 흐름</strong>까지 바로 정리합니다.
             </p>
             <div class="hero-actions">
               <a class="button button-primary" href="#connect">MCP 주소 확인하기</a>
-              <a class="button button-secondary" href="${promptPage}">자세한 사용법 보기</a>
+              <button type="button" class="button button-secondary" data-open-panel="details-panel">자세히 보기</button>
             </div>
             <div class="hero-trust">
-              <span>원하는 천체에 맞춘 가장 좋은 시간대 확인</span>
-              <span>카카오맵 API를 활용한 쉬운 지명 검색</span>
+              <span>은하수와 딥스카이를 위한 시간대별 분석</span>
+              <span>지명 검색부터 광해 추정까지 한 번에 연결</span>
             </div>
           </div>
 
@@ -941,8 +1219,8 @@ export function buildInstallPage({ publicBaseUrl }) {
                   </div>
                 </div>
                 <div class="chatgpt-icons" aria-hidden="true">
-                  <div class="chatgpt-icon">⌁</div>
-                  <div class="chatgpt-icon">◎</div>
+                  <div class="chatgpt-icon">⌕</div>
+                  <div class="chatgpt-icon">◌</div>
                 </div>
               </div>
 
@@ -975,8 +1253,8 @@ export function buildInstallPage({ publicBaseUrl }) {
                   <div class="chatgpt-message">
                     <div class="chatgpt-label">AI의 응답:</div>
                     <div class="chatgpt-assistant">
-                      <p>11시에도 촬영 자체는 가능하지만, 그 시간만 보면 최적이라고 하긴 어렵습니다. 지금 결과에선 초반 점수가 56점대에서 시작하고, 자정 이후 61점 안팎으로 올라간 뒤 새벽 1시부터 3시 사이에 73점대에서 81점대까지 가장 좋게 형성됩니다. 그래서 육백마지기에서 은하수를 노린다면 11시에 바로 본촬영에 들어가기보다는, 현장 도착 후 대기하면서 새벽 구간을 메인 시간대로 잡는 편이 훨씬 유리합니다.</p>
-                      <p>왜 그렇게 보냐면, blocker timeline상 초반엔 달빛이 가장 큰 감점 요인이고, 뒤로 갈수록 대기 투명도가 더 중요한 변수로 넘어가기 때문입니다. 광해 추정은 보틀 4.0~4.6 수준이라 은하수 자체는 충분히 노려볼 만하고, best window도 01:00~03:00으로 잡혀 있습니다. 한 줄로 정리하면, 11시는 출발해도 되는 시간이고 실제 촬영은 1시 이후를 노리는 쪽이 더 좋습니다 <span class="assistant-truncate"> ...</span></p>
+                      <p>11시에도 촬영은 가능하지만, 그 시간만 보고 바로 본촬영에 들어가기에는 조금 이릅니다. 이번 결과에서는 초반 점수가 56점으로 시작하고 자정 이후 61점 안팎으로 올라간 뒤, 새벽 1시부터 3시 사이에 73점에서 81점까지 가장 좋게 형성됩니다. 그래서 육백마지기에서 은하수를 노린다면 11시에는 이동과 장비 세팅, 구도 확인 정도로 쓰고 실제 메인 촬영은 1시 이후로 잡는 편이 더 유리합니다.</p>
+                      <p>이렇게 보는 이유는 시간대별 blocker가 초반에는 달빛이고, 뒤로 갈수록 대기 투명도로 바뀌기 때문입니다. 동시에 광해 추정은 Bortle-like 4.0~4.6 수준이라 장소 자체는 충분히 가능성이 있고, best window도 01:00~03:00으로 잡혔습니다. 정리하면 내일 밤 11시는 출발하기 괜찮은 시점이고, 가장 좋은 결과는 새벽 구간에서 기대하는 편이 맞습니다 <span class="assistant-truncate"> ...</span></p>
                     </div>
                   </div>
                 </div>
@@ -987,10 +1265,10 @@ export function buildInstallPage({ publicBaseUrl }) {
                     <div class="chatgpt-input-row">
                       <div class="chatgpt-input-tools">
                         <div class="chatgpt-round">+</div>
-                        <div class="chatgpt-round">◎</div>
+                        <div class="chatgpt-round">◌</div>
                         <span>생각 중</span>
                       </div>
-                      <div class="chatgpt-send">◉</div>
+                      <div class="chatgpt-send">●</div>
                     </div>
                   </div>
                 </div>
@@ -1005,7 +1283,7 @@ export function buildInstallPage({ publicBaseUrl }) {
           <div class="section-header">
             <div class="section-label">바로 연결</div>
             <h2>ChatGPT에 붙이면 바로 쓸 수 있습니다</h2>
-            <p>첫 화면에서는 연결과 가치만 빠르게 보여주고, 자세한 사용법은 별도 페이지에서 이어서 볼 수 있게 정리했습니다.</p>
+            <p>설치는 짧게, 이해는 쉽게. 처음 보는 사람도 바로 연결하고 필요한 기준만 빠르게 확인할 수 있게 정리했습니다.</p>
           </div>
 
           <div class="grid grid-2">
@@ -1020,29 +1298,28 @@ export function buildInstallPage({ publicBaseUrl }) {
             </article>
 
             <article class="panel content-card">
-              <span class="feature-kicker">자세히 보기</span>
-              <h3>프롬프트와 사용법 페이지</h3>
-              <p class="copy">설정 전에 구조를 먼저 보고 싶다면 이 페이지에서 프롬프트, 예시 질문, 연결 흐름을 한 번에 볼 수 있습니다.</p>
-              <input class="endpoint-box" value="${promptPage}" readonly id="prompt-page" />
+              <span class="feature-kicker">무엇을 보는지</span>
+              <h3>데이터와 점수 기준을 먼저 확인하세요</h3>
+              <p class="copy">어떤 정보를 가져오고, 점수가 어떻게 정해지며, 광해 등급이 어떤 데이터 기준으로 계산되는지 한 번에 볼 수 있습니다.</p>
+              <input class="endpoint-box" value="점수 구성 · 광해 추정 · 촬영 모드 · outlook 기준" readonly id="details-summary" />
               <div class="card-actions">
-                <button type="button" class="button button-secondary" data-copy="#prompt-page">링크 복사</button>
-                <a class="button button-secondary" href="${promptPage}">자세히 보기</a>
+                <button type="button" class="button button-secondary" data-open-panel="details-panel">자세히 보기</button>
               </div>
             </article>
           </div>
 
           <div class="glass-strip">
             <div class="panel">
-              <strong>오늘 나가도 되는지</strong>
-              <p class="muted">점수 하나가 아니라 밤 전체 흐름을 보여주므로, 지금 출발해도 되는지 바로 판단하기 쉽습니다.</p>
+              <strong>오늘 갈 만한 밤인지</strong>
+              <p class="muted">점수 하나가 아니라 밤 전체 흐름을 보여주기 때문에 지금 출발해도 되는지 빠르게 판단하기 쉽습니다.</p>
             </div>
             <div class="panel">
               <strong>몇 시가 가장 좋은지</strong>
-              <p class="muted">best window와 blocker timeline으로, 좋은 시간대와 감점 원인을 시간대별로 바로 볼 수 있습니다.</p>
+              <p class="muted">best window와 blocker timeline으로, 좋은 시간과 감점 요인을 시간대별로 바로 볼 수 있습니다.</p>
             </div>
             <div class="panel">
               <strong>무엇이 문제인지</strong>
-              <p class="muted">달빛인지, 투명도인지, 광해인지 구분해서 설명하므로 초보자도 원인을 이해하기 쉽습니다.</p>
+              <p class="muted">월광인지, 투명도인지, 광해인지 구분해서 설명하므로 초보자도 원인을 이해하기 쉽습니다.</p>
             </div>
           </div>
         </div>
@@ -1051,30 +1328,30 @@ export function buildInstallPage({ publicBaseUrl }) {
       <section class="section">
         <div class="shell">
           <div class="section-header">
-            <div class="section-label">사용 예시:</div>
+            <div class="section-label">사용 예시</div>
             <h2>막연한 계획을 바로 실행 가능한 정보로</h2>
-            <p>밤하늘 점수, 시간대별 흐름, 광해 추정, 타깃 고도를 함께 엮어 실제 출사 판단으로 돌려줍니다.</p>
+            <p>밤하늘 점수, 시간대별 흐름, 광해 추정, 목표 고도를 함께 읽어 실제 출사 판단으로 이어줍니다.</p>
           </div>
           <ol class="steps">
             <li class="panel step">
               <div class="step-number">1</div>
               <div>
-                <h3>이날 밤 여기서 찍어도 될까?</h3>
-                <p>장소와 시간만 말하면 당시의 밤하늘 예보를를 기준으로 가능 여부와 가장 좋은 시간을 바로 계산합니다.</p>
+                <h3>이날 밤 가도 되는가?</h3>
+                <p>장소와 날짜만 말하면 즉시 그 밤의 기본 가능성과 가장 좋은 시간대를 계산합니다.</p>
               </div>
             </li>
             <li class="panel step">
               <div class="step-number">2</div>
               <div>
-                <h3>은하수는 몇 시가 좋은가?</h3>
-                <p>초반엔 달빛, 새벽엔 투명도... 감점 요인이 바뀌는 흐름까지 같이 보여줘서 시간 선택이 쉬워집니다.</p>
+                <h3>어느 시간이 좋은가?</h3>
+                <p>초반에는 달빛, 새벽에는 투명도처럼 감점 요인이 어떻게 바뀌는지도 함께 보여줍니다.</p>
               </div>
             </li>
             <li class="panel step">
               <div class="step-number">3</div>
               <div>
                 <h3>딥스카이까지 가능한가?</h3>
-                <p>광해 추정, 모드별 점수, 타깃 고도까지 함께 계산하므로로 단순 날씨 확인보다 훨씬 실전적인 판단이 가능합니다.</p>
+                <p>광해 추정, 모드별 점수, 목표 고도까지 함께 계산해 단순 날씨 확인보다 훨씬 실전적인 판단을 제공합니다.</p>
               </div>
             </li>
           </ol>
@@ -1085,8 +1362,8 @@ export function buildInstallPage({ publicBaseUrl }) {
         <div class="shell">
           <div class="section-header">
             <div class="section-label">핵심 구현</div>
-            <h2>필요하면 API와 장기 예보도 함께 붙일 수 있습니다</h2>
-            <p>첫 화면은 광고 중심으로 두고, 실제 연결과 검증은 아래 샘플 URL로 바로 테스트할 수 있게 남겨뒀습니다.</p>
+            <h2>필요하면 API와 로직 정보도 바로 확인할 수 있습니다</h2>
+            <p>첫 화면은 광고 중심으로 두되, 연결 뒤 검증이 필요한 사람을 위해 바로 테스트할 수 있는 예시도 남겨뒀습니다.</p>
           </div>
           <div class="grid grid-3">
             <article class="panel feature-card">
@@ -1100,9 +1377,9 @@ export function buildInstallPage({ publicBaseUrl }) {
             </article>
 
             <article class="panel feature-card">
-              <span class="feature-kicker">장소명 기반 API</span>
+              <span class="feature-kicker">지명 기반 API</span>
               <h3>장소명으로 조회</h3>
-              <p class="copy">카카오 Local API 키가 설정되어 있으면 한국 장소명만으로 좌표를 해석해서 조회할 수 있습니다.</p>
+              <p class="copy">카카오 Local API가 설정되어 있으면 한국 지명만으로 좌표를 해석해 조회할 수 있습니다.</p>
               <pre id="place-api-example">${placeApiExample}</pre>
               <div class="card-actions">
                 <button type="button" class="button button-secondary" data-copy="#place-api-example">예시 복사</button>
@@ -1110,9 +1387,9 @@ export function buildInstallPage({ publicBaseUrl }) {
             </article>
 
             <article class="panel feature-card">
-              <span class="feature-kicker">장기 예보 API</span>
-              <h3>먼 날짜는 간단 모드로 확인</h3>
-              <p class="copy">6일 이후 날짜는 false precision을 줄이기 위해 full detail 대신 단순화된 outlook 응답으로 안내합니다.</p>
+              <span class="feature-kicker">원거리 날짜 API</span>
+              <h3>먼 날짜는 outlook로</h3>
+              <p class="copy">6일 이후 날짜는 false precision을 줄이기 위해 full detail 대신 간단한 outlook 응답으로 전환됩니다.</p>
               <pre id="outlook-example">${outlookExample}</pre>
               <div class="card-actions">
                 <button type="button" class="button button-secondary" data-copy="#outlook-example">예시 복사</button>
@@ -1123,7 +1400,102 @@ export function buildInstallPage({ publicBaseUrl }) {
       </section>
 
       <div class="footer-note shell">
-        mcp-darksky는 Open-Meteo 예보, 천문 계산, 한국형 광해 추정, 타깃 고도 분석을 조합해 밤하늘 촬영 판단을 돕습니다.
+        mcp-darksky는 Open-Meteo 예보, 천문 계산, 한국형 광해 추정, 목표 고도 분석을 조합해 밤하늘 촬영 판단을 돕습니다.
+      </div>
+    </div>
+    <div class="details-overlay" id="details-panel" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="details-title">
+      <div class="details-panel">
+        <div class="details-header">
+          <div>
+            <div class="section-label">자세히</div>
+            <h2 id="details-title">이 도구가 무엇을 보고 어떻게 점수를 만드는지</h2>
+            <p>mcp-darksky는 오늘 밤 바로 쓸 수 있는 정보만 추려 AI에 넘기기 위해 만들어졌습니다. 예보, 천문 정보, 광해 추정, 목표 고도까지 한 번에 모아서 “지금 가도 되는지”와 “몇 시가 제일 좋은지”를 답합니다.</p>
+          </div>
+          <button type="button" class="details-close" data-close-panel="details-panel" aria-label="자세히 패널 닫기">✕</button>
+        </div>
+
+        <div class="details-content">
+          <div class="details-grid">
+            <article class="details-card">
+              <span class="details-kicker">무엇을 가져오나요?</span>
+              <h3>날씨, 공기질, 천문 정보를 함께 읽습니다</h3>
+              <p>한 가지 예보만 보는 대신 밤하늘 촬영에 직접 영향을 주는 정보만 모아 씁니다.</p>
+              <ul>
+                <li>Open-Meteo에서 기온, 이슬점, 습도, 총운량과 저·중·고층 구름, 시정, 강수, 풍속과 돌풍을 가져옵니다.</li>
+                <li>같은 흐름에서 PM2.5, PM10, dust, aerosol optical depth, AQI, 오존과 이산화질소를 받아 투명도 해석에 반영합니다.</li>
+                <li>천문박명, 달의 고도와 조도, 은하수 중심부 가시성, 목표 고도와 airmass는 내부 천문 계산으로 바로 만듭니다.</li>
+              </ul>
+            </article>
+
+            <article class="details-card">
+              <span class="details-kicker">점수는 어떻게 정해지나요?</span>
+              <h3>한 점수보다 밤 전체의 흐름을 보여줍니다</h3>
+              <p>최종 점수는 다섯 하위 점수를 묶어 계산하고, 동시에 시간대별 score curve와 best window를 같이 만듭니다.</p>
+              <div class="formula-block">
+                <code>overall_score = w_cloud × cloud_score
++ w_transparency × transparency_score
++ w_darkness × darkness_score
++ w_dew × dew_risk_score
++ w_stability × stability_score</code>
+                <code>mode_score = mode_weights(weather, darkness, target_altitude, moon_separation)</code>
+                <code>best_window = argmax(avg(score_curve[t₀ ... tₙ]))</code>
+              </div>
+              <ul>
+                <li>핵심 하위 점수는 cloud, transparency, darkness, dew risk, stability입니다.</li>
+                <li>강수, 안개, 매우 낮은 시정 같은 조건은 hard fail로 따로 표시합니다.</li>
+                <li>결과는 overall score 하나로 끝나지 않고 score curve, blocker timeline, best window, window rankings로 이어집니다.</li>
+              </ul>
+            </article>
+
+            <article class="details-card">
+              <span class="details-kicker">광해 등급</span>
+              <h3>한국형 보정이 들어간 추정 Bortle-like 값입니다</h3>
+              <p>광해는 NASA 야간조도 데이터를 바탕으로 추정한 Bortle-like 값으로 보여주며, 장소 비교와 시간대 해설에 바로 쓸 수 있도록 한국 기준 보정을 함께 적용합니다.</p>
+              <ul>
+                <li>NASA Black Marble annual VIIRS 제품인 VNP46A4와 VJ146A4의 2025년 snow-free composite(A2025001 계열)를 사용합니다.</li>
+                <li>현재 광해 추정 방식은 <code>2026-03-19-continuous-bortle-v2-korea-calibrated</code> 버전입니다.</li>
+                <li>결과는 공식 보틀 등급이 아니라 <code>estimated_bortle_center</code>와 <code>estimated_bortle_range</code> 형태의 추정값입니다.</li>
+              </ul>
+              <div class="details-meta">
+                <div class="panel">
+                  <strong>입력 데이터</strong>
+                  <span>VNP46A4 / VJ146A4<br />2025 annual snow-free composite</span>
+                </div>
+                <div class="panel">
+                  <strong>함께 보여주는 값</strong>
+                  <span>한국 내 밝기·어두움 퍼센타일<br />regional glow와 confidence</span>
+                </div>
+                <div class="panel">
+                  <strong>출력 형태</strong>
+                  <span>중심값과 범위를 함께 보여줘 장소 간 비교와 AI 해설에 바로 쓸 수 있습니다.</span>
+                </div>
+              </div>
+            </article>
+
+            <article class="details-card">
+              <span class="details-kicker">촬영 모드</span>
+              <h3>같은 밤도 무엇을 찍느냐에 따라 해석이 달라집니다</h3>
+              <p>달빛과 안정성, 목표 고도는 촬영 방식에 따라 중요도가 달라서 모드별 가중치를 따로 둡니다.</p>
+              <ul>
+                <li><code>wide_field_milky_way</code> · <code>wide_field_nightscape</code></li>
+                <li><code>broadband_deep_sky</code> · <code>narrowband_deep_sky</code></li>
+                <li><code>star_trail</code> · <code>general</code></li>
+                <li>목표를 넣으면 달-목표 separation, 목표 고도, airmass까지 같이 계산해 “몇 시가 가장 좋은지”를 더 정확히 정리합니다.</li>
+              </ul>
+            </article>
+
+            <article class="details-card details-wide">
+              <span class="details-kicker">먼 날짜는 어떻게 처리하나요?</span>
+              <h3>6일 이후는 상세 점수 대신 outlook로 전환합니다</h3>
+              <p>먼 날짜에 시간별 점수를 너무 세밀하게 보여주면 오히려 잘못된 확신을 줄 수 있습니다. 그래서 가까운 날짜와 먼 날짜를 다르게 다룹니다.</p>
+              <ul>
+                <li>0일에서 5일 이내는 시간대별 score curve, blocker timeline, best window까지 상세하게 보여줍니다.</li>
+                <li>6일 이후는 <code>score_night_sky_outlook</code> 경로로 전환해 블록 단위 전망과 핵심 해설만 남깁니다.</li>
+                <li>즉, 가까운 날짜는 “정밀한 실행 판단”, 먼 날짜는 “거친 계획 수립”에 맞춰 설계되어 있습니다.</li>
+              </ul>
+            </article>
+          </div>
+        </div>
       </div>
     </div>
     <div class="toast" id="toast">복사했습니다.</div>
@@ -1131,7 +1503,6 @@ export function buildInstallPage({ publicBaseUrl }) {
   </body>
 </html>`;
 }
-
 export function buildHomePage({ publicBaseUrl }) {
   const sampleDate = getSuggestedForecastDate("Asia/Seoul");
   const coordinateExample = `${publicBaseUrl}/api/score?latitude=37.6229&longitude=128.7391&date=${sampleDate}&mode=wide_field_milky_way`;
@@ -1222,3 +1593,4 @@ export function buildHomePage({ publicBaseUrl }) {
   </body>
 </html>`;
 }
+
