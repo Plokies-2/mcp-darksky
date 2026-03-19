@@ -1,2 +1,5 @@
 node_modules/
 .env
+data/VNP46A4/
+data/VJ146A4/
+scripts/__pycache__/
