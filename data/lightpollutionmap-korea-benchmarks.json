@@ -1,0 +1,75 @@
+{
+  "source": "LightPollutionMap.info",
+  "overlay": "Sky Brightness (2025)",
+  "collected_at": "2026-03-19T06:58:00+09:00",
+  "notes": [
+    "Benchmarks were collected from the point-inspection panel after searching exact coordinates.",
+    "Displayed Bortle values on the site are categorical, so target_display_bortle_center refines them with decimals using the site's SQM ordering inside the same displayed class."
+  ],
+  "benchmarks": [
+    {
+      "name": "Seoul City Hall",
+      "latitude": 37.5662952,
+      "longitude": 126.9779451,
+      "lpm_sqm_mpsas": 17.46,
+      "lpm_bortle_class_label": "8-9",
+      "target_display_bortle_center": 8.6
+    },
+    {
+      "name": "Busan City Hall",
+      "latitude": 35.1798159,
+      "longitude": 129.0750222,
+      "lpm_sqm_mpsas": 17.85,
+      "lpm_bortle_class_label": "8-9",
+      "target_display_bortle_center": 8.4
+    },
+    {
+      "name": "Anbandegi",
+      "latitude": 37.62290058479758,
+      "longitude": 128.7391412750242,
+      "lpm_sqm_mpsas": 21.23,
+      "lpm_bortle_class_label": "4",
+      "target_display_bortle_center": 4.2
+    },
+    {
+      "name": "Yukbaekmajigi",
+      "latitude": 37.40334417494712,
+      "longitude": 128.5151042157018,
+      "lpm_sqm_mpsas": 21.51,
+      "lpm_bortle_class_label": "4",
+      "target_display_bortle_center": 3.8
+    },
+    {
+      "name": "Guryeongnyeong",
+      "latitude": 37.8799155232604,
+      "longitude": 128.514082447769,
+      "lpm_sqm_mpsas": 21.64,
+      "lpm_bortle_class_label": "4",
+      "target_display_bortle_center": 3.6
+    },
+    {
+      "name": "Nogodan",
+      "latitude": 35.29367500800736,
+      "longitude": 127.53210019974368,
+      "lpm_sqm_mpsas": 21.27,
+      "lpm_bortle_class_label": "4",
+      "target_display_bortle_center": 4.1
+    },
+    {
+      "name": "Sobaeksan Observatory",
+      "latitude": 36.934111226654196,
+      "longitude": 128.45774583702436,
+      "lpm_sqm_mpsas": 21.24,
+      "lpm_bortle_class_label": "4",
+      "target_display_bortle_center": 4.2
+    },
+    {
+      "name": "Hallasan 1100",
+      "latitude": 33.3580781709788,
+      "longitude": 126.462219691112,
+      "lpm_sqm_mpsas": 21.12,
+      "lpm_bortle_class_label": "4",
+      "target_display_bortle_center": 4.4
+    }
+  ]
+}

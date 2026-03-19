@@ -19,6 +19,8 @@ async function getNodePaths() {
     scriptPath: path.join(projectRoot, "scripts", "black_marble_bortle.py"),
     defaultDataDir: path.join(projectRoot, "data"),
     defaultStatsPath: path.join(projectRoot, "data", "black-marble-korea-stats.json"),
+    defaultDistributionPath: path.join(projectRoot, "data", "black-marble-korea-distribution.json"),
+    defaultBoundaryPath: path.join(projectRoot, "data", "south-korea-boundary.geojson"),
   };
 }
 
@@ -31,6 +33,7 @@ export async function getEstimatedLightPollution({
   longitude,
   dataDir,
   statsPath,
+  distributionPath,
   pythonBin = globalThis.process?.env?.PYTHON_BIN ?? "python",
 } = {}) {
   if (!isNodeRuntime()) {
@@ -58,6 +61,10 @@ export async function getEstimatedLightPollution({
           dataDir ?? paths.defaultDataDir,
           "--stats",
           statsPath ?? paths.defaultStatsPath,
+          "--distribution",
+          distributionPath ?? paths.defaultDistributionPath,
+          "--boundary",
+          paths.defaultBoundaryPath,
           "--lat",
           String(latitude),
           "--lon",

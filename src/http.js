@@ -7,9 +7,12 @@ import { createDarkSkyServer } from "./server.js";
 import {
   buildPromptPage,
   buildPromptText,
+  getLightPollutionMethodologyReport,
   getLightPollutionReport,
+  getNightSkyOutlookReport,
   getNightSkyScoreReport,
   parseLightPollutionQuery,
+  parseOutlookQuery,
   parseScoreQuery,
 } from "./service.js";
 import { buildHomePage, buildInstallPage } from "./web-ui.js";
@@ -72,7 +75,12 @@ app.get("/api/score", async (req, res) => {
     const report = await getNightSkyScoreReport({
       ...input,
       kakaoRestApiKey,
+      publicBaseUrl,
     });
+    if (report.report_kind === "fallback_required") {
+      res.status(409).json(report);
+      return;
+    }
     scoreCache.set(cacheKey, {
       expiresAt: Date.now() + SCORE_CACHE_TTL_MS,
       payload: report,
@@ -113,6 +121,48 @@ app.get("/api/score", async (req, res) => {
   }
 });
 
+app.get("/api/score-outlook", async (req, res) => {
+  try {
+    const input = parseOutlookQuery(req.query);
+    const report = await getNightSkyOutlookReport({
+      ...input,
+      kakaoRestApiKey,
+    });
+    res.json(report);
+  } catch (error) {
+    if (error?.name === "ZodError") {
+      res.status(400).json({
+        error: "Invalid query parameters",
+        details: error.issues,
+      });
+      return;
+    }
+    if (error instanceof RangeError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    if (error instanceof Error && error.message.includes("Kakao REST API key is required")) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    if (error instanceof Error && error.message.includes("No Kakao Local API result matched")) {
+      res.status(404).json({ error: error.message });
+      return;
+    }
+    if (error instanceof Error && error.message.includes("Kakao Local API is currently unreachable")) {
+      res.status(503).json({ error: error.message });
+      return;
+    }
+    if (error instanceof Error && error.message.includes("Upstream weather provider is currently unreachable")) {
+      res.status(503).json({ error: error.message });
+      return;
+    }
+
+    console.error("Error serving /api/score-outlook:", error);
+    res.status(500).json({ error: "Failed to generate night sky outlook" });
+  }
+});
+
 app.get("/api/light-pollution", async (req, res) => {
   try {
     const input = parseLightPollutionQuery(req.query);
@@ -149,6 +199,10 @@ app.get("/api/light-pollution", async (req, res) => {
     console.error("Error serving /api/light-pollution:", error);
     res.status(500).json({ error: "Failed to estimate light pollution" });
   }
+});
+
+app.get("/api/light-pollution/method", (_req, res) => {
+  res.json(getLightPollutionMethodologyReport());
 });
 
 async function handleSessionRequest(req, res) {

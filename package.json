@@ -11,6 +11,7 @@
     "dev:worker": "wrangler dev",
     "deploy:worker": "wrangler deploy",
     "build:light-pollution-stats": "python scripts/black_marble_bortle.py build-stats --data-dir data --output data/black-marble-korea-stats.json",
+    "build:light-pollution-distribution": "python scripts/black_marble_bortle.py build-distribution --data-dir data --stats data/black-marble-korea-stats.json --output data/black-marble-korea-distribution.json",
     "sample:light-pollution": "python scripts/black_marble_bortle.py sample --data-dir data --stats data/black-marble-korea-stats.json --lat 37.5665 --lon 126.9780",
     "test": "node --test"
   },

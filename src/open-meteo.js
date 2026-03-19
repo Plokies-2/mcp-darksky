@@ -100,6 +100,7 @@ export async function fetchForecastBundle({
   startDate,
   endDate,
   timezone = "Asia/Seoul",
+  includeAirQuality = true,
 }) {
   const commonParams = {
     latitude,
@@ -114,14 +115,16 @@ export async function fetchForecastBundle({
     hourly: WEATHER_HOURLY_PARAMS.join(","),
   });
 
-  const airUrl = buildUrl(AIR_API_BASE, {
-    ...commonParams,
-    hourly: AIR_HOURLY_PARAMS.join(","),
-  });
+  const airUrl = includeAirQuality
+    ? buildUrl(AIR_API_BASE, {
+        ...commonParams,
+        hourly: AIR_HOURLY_PARAMS.join(","),
+      })
+    : null;
 
   const [weatherData, airData] = await Promise.all([
     fetchJson(weatherUrl),
-    fetchJson(airUrl),
+    airUrl ? fetchJson(airUrl) : Promise.resolve(null),
   ]);
 
   if (!weatherData.hourly?.time?.length) {
@@ -145,10 +148,15 @@ export async function fetchForecastBundle({
         provider: "Open-Meteo Forecast API",
         url: weatherUrl.toString(),
       },
-      {
-        provider: "Open-Meteo Air Quality API",
-        url: airUrl.toString(),
-      },
+      ...(airUrl
+        ? [
+            {
+              provider: "Open-Meteo Air Quality API",
+              url: airUrl.toString(),
+            },
+          ]
+        : []),
     ],
+    airQualityIncluded: Boolean(airUrl),
   };
 }

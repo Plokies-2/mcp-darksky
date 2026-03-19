@@ -17,7 +17,10 @@ This project exposes multiple entry points inspired by lightweight public MCP de
 
 ### `estimate_light_pollution`
 - Input: `latitude` and `longitude`, or `place_query`
-- Output: local Black Marble radiance context plus an estimated Bortle-like band
+- Output: local Black Marble radiance context plus an estimated Bortle-like center, range, equivalent zenith brightness proxy, and Korea-wide brightness percentile when distribution data is present
+
+### `describe_light_pollution_method`
+- Returns the evidence sources, guardrails, and release checks for the light-pollution estimator
 
 ### `describe_scoring_model`
 - Returns a concise explanation of score fields and recommendation fields
@@ -51,6 +54,7 @@ npm run deploy:worker
 - `/mcp`: MCP endpoint
 - `/api/score`: JSON API
 - `/api/light-pollution`: JSON API for local Black Marble Bortle-like estimate
+- `/api/light-pollution/method`: methodology metadata and review guardrails
 - `/prompt`: prompt fallback page
 - `/prompt.txt`: plain text prompt
 - `/install`: install and share page
@@ -72,7 +76,8 @@ For Workers, set `PUBLIC_BASE_URL` and `KAKAO_REST_API_KEY` in `wrangler.toml` o
 
 - `site_profile.bortle_class` lets callers reflect site light pollution.
 - `place_query` resolves Korean place names and addresses through the Kakao Local REST API.
-- If `data/VNP46A4` and `data/VJ146A4` contain the local annual Black Marble tiles, the service estimates a Bortle-like class automatically.
+- If `data/VNP46A4` and `data/VJ146A4` contain the local annual Black Marble tiles, the service estimates a continuous Bortle-like center automatically and includes an uncertainty range.
+- If `data/black-marble-korea-distribution.json` exists, the service also reports where a location sits within the Republic of Korea-only brightness distribution.
 - `GET /api/score` only works for dates inside the current Open-Meteo forecast window.
 - If the upstream weather provider is temporarily unreachable, the API returns `503`.
 - The Workers entry uses stateless Web Standard Streamable HTTP transport, which fits lightweight public deployment.
@@ -82,5 +87,6 @@ For Workers, set `PUBLIC_BASE_URL` and `KAKAO_REST_API_KEY` in `wrangler.toml` o
 ```bash
 npm install
 npm run build:light-pollution-stats
+npm run build:light-pollution-distribution
 npm test
 ```
