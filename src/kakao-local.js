@@ -1,3 +1,5 @@
+import { fetchWithRetries } from "./retry-fetch.js";
+
 const KAKAO_KEYWORD_SEARCH_URL = "https://dapi.kakao.com/v2/local/search/keyword.json";
 const KAKAO_ADDRESS_SEARCH_URL = "https://dapi.kakao.com/v2/local/search/address.json";
 
@@ -19,25 +21,25 @@ function normalizeText(value) {
 }
 
 async function fetchKakaoJson(url, restApiKey) {
-  let response;
-
   try {
-    response = await fetch(url, {
-      headers: {
-        Authorization: `KakaoAK ${restApiKey}`,
+    const response = await fetchWithRetries(url, {
+      label: `Kakao Local API request to ${url.hostname}`,
+      fetchOptions: {
+        headers: {
+          Authorization: `KakaoAK ${restApiKey}`,
+        },
       },
     });
+    if (!response.ok) {
+      throw new Error(`Kakao Local API request failed with ${response.status}: ${response.statusText}`);
+    }
+
+    return response.json();
   } catch (error) {
     throw new Error(`Kakao Local API is currently unreachable: ${url.hostname}`, {
       cause: error,
     });
   }
-
-  if (!response.ok) {
-    throw new Error(`Kakao Local API request failed with ${response.status}: ${response.statusText}`);
-  }
-
-  return response.json();
 }
 
 function normalizeResolvedPlace(document, query) {

@@ -53,6 +53,7 @@ npm run deploy:worker
 
 - `/mcp`: MCP endpoint
 - `/api/score`: JSON API
+- `/api/score-outlook`: coarse outlook API for dates beyond the full-detail window
 - `/api/light-pollution`: JSON API for local Black Marble Bortle-like estimate
 - `/api/light-pollution/method`: methodology metadata and review guardrails
 - `/prompt`: prompt fallback page
@@ -76,6 +77,8 @@ For Workers, set `PUBLIC_BASE_URL` and `KAKAO_REST_API_KEY` in `wrangler.toml` o
 
 - `site_profile.bortle_class` lets callers reflect site light pollution.
 - `place_query` resolves Korean place names and addresses through the Kakao Local REST API.
+- `score_night_sky` uses full hourly detail only through `+5 days`; from `+6 days` onward the service intentionally downgrades to the outlook path to avoid false precision.
+- External Open-Meteo and Kakao API calls use an initial request plus up to 3 retries when upstream does not respond or returns retryable status codes.
 - If `data/VNP46A4` and `data/VJ146A4` contain the local annual Black Marble tiles, the service estimates a continuous Bortle-like center automatically and includes an uncertainty range.
 - If `data/black-marble-korea-distribution.json` exists, the service also reports where a location sits within the Republic of Korea-only brightness distribution.
 - `GET /api/score` only works for dates inside the current Open-Meteo forecast window.
@@ -90,3 +93,28 @@ npm run build:light-pollution-stats
 npm run build:light-pollution-distribution
 npm test
 ```
+
+## Deployment Checklist
+
+1. Set required environment variables.
+   - `PUBLIC_BASE_URL`
+   - `KAKAO_REST_API_KEY` if you want `place_query`
+   - `ALLOWED_HOSTS` for Node HTTP deployments
+2. Confirm local data files exist if you want light-pollution estimation.
+   - `data/VNP46A4/...`
+   - `data/VJ146A4/...`
+   - `data/black-marble-korea-distribution.json`
+3. Run verification before deploy.
+   - `npm test`
+   - smoke-check `/health`
+   - smoke-check `/api/score-outlook`
+4. Deploy one runtime.
+   - Node HTTP: `npm run start:http`
+   - Workers: `npm run deploy:worker`
+5. Post-deploy smoke test.
+   - `/health`
+   - `/mcp`
+   - `/api/score?latitude=37.6229&longitude=128.7391&date=<within-5-days>`
+   - `/api/score-outlook?latitude=37.6229&longitude=128.7391&date=<6+-days>`
+6. Share the onboarding link.
+   - `/install`

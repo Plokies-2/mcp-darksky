@@ -1,3 +1,5 @@
+import { fetchWithRetries } from "./retry-fetch.js";
+
 const WEATHER_API_BASE = "https://api.open-meteo.com/v1/forecast";
 const AIR_API_BASE = "https://air-quality-api.open-meteo.com/v1/air-quality";
 
@@ -51,30 +53,30 @@ async function fetchJson(url) {
     return cached.payload;
   }
 
-  let response;
-
   try {
-    response = await fetch(url, {
-      headers: {
-        "User-Agent": "mcp-darksky/0.1.0",
+    const response = await fetchWithRetries(url, {
+      label: `Open-Meteo request to ${url.hostname}`,
+      fetchOptions: {
+        headers: {
+          "User-Agent": "mcp-darksky/0.1.0",
+        },
       },
     });
+    if (!response.ok) {
+      throw new Error(`Open-Meteo request failed with ${response.status}: ${response.statusText}`);
+    }
+
+    const payload = await response.json();
+    responseCache.set(cacheKey, {
+      expiresAt: Date.now() + RESPONSE_CACHE_TTL_MS,
+      payload,
+    });
+    return payload;
   } catch (error) {
     throw new Error(`Upstream weather provider is currently unreachable: ${url.hostname}`, {
       cause: error,
     });
   }
-
-  if (!response.ok) {
-    throw new Error(`Open-Meteo request failed with ${response.status}: ${response.statusText}`);
-  }
-
-  const payload = await response.json();
-  responseCache.set(cacheKey, {
-    expiresAt: Date.now() + RESPONSE_CACHE_TTL_MS,
-    payload,
-  });
-  return payload;
 }
 
 function buildHourlyMap(hourly) {
