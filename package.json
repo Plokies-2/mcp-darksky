@@ -8,6 +8,10 @@
     "start": "node src/index.js",
     "start:stdio": "node src/stdio.js",
     "start:http": "node src/http.js",
+    "dev:worker": "wrangler dev",
+    "deploy:worker": "wrangler deploy",
+    "build:light-pollution-stats": "python scripts/black_marble_bortle.py build-stats --data-dir data --output data/black-marble-korea-stats.json",
+    "sample:light-pollution": "python scripts/black_marble_bortle.py sample --data-dir data --stats data/black-marble-korea-stats.json --lat 37.5665 --lon 126.9780",
     "test": "node --test"
   },
   "keywords": [
@@ -19,7 +23,12 @@
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
+    "dotenv": "^17.2.3",
+    "hono": "^4.11.4",
     "suncalc": "^1.9.0",
     "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "wrangler": "^4.9.0"
   }
 }

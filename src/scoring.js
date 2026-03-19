@@ -44,7 +44,8 @@ function calculateTransparencyScore(hour) {
   const pm10Penalty = clamp(((hour.pm10 ?? 0) / 150) * 20, 0, 20);
   const aodPenalty = clamp(((hour.aerosol_optical_depth ?? 0) / 0.8) * 25, 0, 25);
   const dustPenalty = clamp(((hour.dust ?? 0) / 100) * 15, 0, 15);
-  return clamp(visibilityScore - pm25Penalty - pm10Penalty - aodPenalty - dustPenalty, 0, 100);
+  const aqiPenalty = clamp(((hour.european_aqi ?? hour.us_aqi ?? 0) / 100) * 18, 0, 18);
+  return clamp(visibilityScore - pm25Penalty - pm10Penalty - aodPenalty - dustPenalty - aqiPenalty, 0, 100);
 }
 
 function calculateDarknessScore(hour, siteProfile) {
@@ -114,6 +115,9 @@ function buildExplanationHints(hour) {
   }
   if (hour.transparency_score < 45) {
     hints.push("미세먼지나 연무 때문에 대기 투명도가 낮습니다.");
+  }
+  if ((hour.european_aqi ?? hour.us_aqi ?? 0) >= 75) {
+    hints.push("AQI가 높아 대기질과 촬영 체감 품질이 함께 나빠질 수 있습니다.");
   }
   if (hour.stability_score < 45) {
     hints.push("풍속 또는 기온 변화 때문에 선예도 확보가 어렵습니다.");
@@ -231,6 +235,9 @@ function buildSummaryFlags(hours, siteProfile) {
   if (hours.some((hour) => hour.transparency_score < 35)) {
     flags.add("미세먼지 또는 연무로 투명도 저하");
   }
+  if (hours.some((hour) => (hour.european_aqi ?? hour.us_aqi ?? 0) >= 75)) {
+    flags.add("대기질 지수가 높아 장시간 촬영이 불편할 수 있음");
+  }
   if (hours.every((hour) => hour.cloud_score < 40)) {
     flags.add("구름 때문에 촬영 부적합");
   }
@@ -285,8 +292,18 @@ export function generateNightSkyReport({
   locationName,
   hourlyForecast,
   sourceAttribution = [],
+  lightPollutionEstimate = null,
   siteProfile = {},
 }) {
+  const appliedBortleClass = clamp(
+    siteProfile.bortleClass ?? lightPollutionEstimate?.estimated_bortle_center ?? 4,
+    1,
+    9,
+  );
+  const effectiveSiteProfile = {
+    ...siteProfile,
+    bortleClass: appliedBortleClass,
+  };
   const enriched = enrichHourly({ hourlyForecast, latitude, longitude });
   const { bounds, hours } = selectNightHours({
     hourlyForecast: enriched,
@@ -299,7 +316,7 @@ export function generateNightSkyReport({
     throw new Error("No hourly forecast data overlaps with the requested night window.");
   }
 
-  const scoredHours = hours.map((hour, index) => scoreHour(hour, hours[index - 1], siteProfile));
+  const scoredHours = hours.map((hour, index) => scoreHour(hour, hours[index - 1], effectiveSiteProfile));
   const bestWindow = buildBestWindow(scoredHours);
   const overallScore = round(average(scoredHours.map((hour) => hour.overall_score)));
   const cloudScore = round(average(scoredHours.map((hour) => hour.cloud_score)));
@@ -307,7 +324,7 @@ export function generateNightSkyReport({
   const darknessScore = round(average(scoredHours.map((hour) => hour.darkness_score)));
   const dewRiskScore = round(average(scoredHours.map((hour) => hour.dew_risk_score)));
   const stabilityScore = round(average(scoredHours.map((hour) => hour.stability_score)));
-  const summaryFlags = buildSummaryFlags(scoredHours, siteProfile);
+  const summaryFlags = buildSummaryFlags(scoredHours, effectiveSiteProfile);
   const goNoGo = overallScore >= 60 && scoredHours.some((hour) => hour.overall_score >= 65);
 
   return {
@@ -317,9 +334,12 @@ export function generateNightSkyReport({
       longitude,
       timezone,
       site_profile: {
-        bortle_class: siteProfile.bortleClass ?? 4,
-        elevation_m: siteProfile.elevationM ?? null,
-        near_water: siteProfile.nearWater ?? false,
+        bortle_class: appliedBortleClass,
+        provided_bortle_class: siteProfile.bortleClass ?? null,
+        estimated_bortle_band: lightPollutionEstimate?.estimated_bortle_band ?? null,
+        estimated_bortle_center: lightPollutionEstimate?.estimated_bortle_center ?? null,
+        elevation_m: effectiveSiteProfile.elevationM ?? null,
+        near_water: effectiveSiteProfile.nearWater ?? false,
       },
     },
     forecast_time_range: {
@@ -361,6 +381,10 @@ export function generateNightSkyReport({
         pm10: hour.pm10,
         aerosol_optical_depth: hour.aerosol_optical_depth,
         dust: hour.dust,
+        european_aqi: hour.european_aqi,
+        us_aqi: hour.us_aqi,
+        ozone: hour.ozone,
+        nitrogen_dioxide: hour.nitrogen_dioxide,
         astronomical_night: hour.astronomicalNight,
         moon_altitude_degrees: round(hour.moonAltitudeDegrees),
         moon_illumination_fraction: round(hour.moonIlluminationFraction, 2),
@@ -390,8 +414,23 @@ export function generateNightSkyReport({
       moon_interference_hours: scoredHours.filter((hour) => hour.moonVisible).length,
       astronomical_night_hours: scoredHours.filter((hour) => hour.astronomicalNight).length,
     },
+    air_quality_context: {
+      peak_european_aqi: round(max(scoredHours.map((hour) => hour.european_aqi ?? 0))),
+      peak_us_aqi: round(max(scoredHours.map((hour) => hour.us_aqi ?? 0))),
+      average_pm2_5: round(average(scoredHours.map((hour) => hour.pm2_5 ?? 0))),
+      average_pm10: round(average(scoredHours.map((hour) => hour.pm10 ?? 0))),
+    },
+    light_pollution_context: lightPollutionEstimate,
     source_attribution: [
       ...sourceAttribution,
+      ...(lightPollutionEstimate && !lightPollutionEstimate.unavailable
+        ? [
+            {
+              provider: "NASA Black Marble annual local tiles",
+              detail: "Estimated Bortle-like darkness proxy from local VNP46A4 and VJ146A4 annual composites.",
+            },
+          ]
+        : []),
       {
         provider: "SunCalc",
         detail: "Solar, lunar, and twilight calculations for per-hour astronomy context.",

@@ -25,7 +25,14 @@ const AIR_HOURLY_PARAMS = [
   "pm10",
   "aerosol_optical_depth",
   "dust",
+  "european_aqi",
+  "us_aqi",
+  "ozone",
+  "nitrogen_dioxide",
 ];
+
+const RESPONSE_CACHE_TTL_MS = 15 * 60 * 1000;
+const responseCache = new Map();
 
 function buildUrl(base, params) {
   const url = new URL(base);
@@ -38,17 +45,36 @@ function buildUrl(base, params) {
 }
 
 async function fetchJson(url) {
-  const response = await fetch(url, {
-    headers: {
-      "User-Agent": "mcp-darksky/0.1.0",
-    },
-  });
+  const cacheKey = url.toString();
+  const cached = responseCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.payload;
+  }
+
+  let response;
+
+  try {
+    response = await fetch(url, {
+      headers: {
+        "User-Agent": "mcp-darksky/0.1.0",
+      },
+    });
+  } catch (error) {
+    throw new Error(`Upstream weather provider is currently unreachable: ${url.hostname}`, {
+      cause: error,
+    });
+  }
 
   if (!response.ok) {
     throw new Error(`Open-Meteo request failed with ${response.status}: ${response.statusText}`);
   }
 
-  return response.json();
+  const payload = await response.json();
+  responseCache.set(cacheKey, {
+    expiresAt: Date.now() + RESPONSE_CACHE_TTL_MS,
+    payload,
+  });
+  return payload;
 }
 
 function buildHourlyMap(hourly) {
