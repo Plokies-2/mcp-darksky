@@ -239,6 +239,9 @@ npm run deploy:worker
 - `ALLOWED_HOSTS`: Node HTTP 허용 호스트 목록
 - `MCP_TRANSPORT=http`: `npm start`를 HTTP 모드로 실행
 
+참고:
+- Railway처럼 `PORT`가 자동으로 주어지는 배포 환경에서는 `npm start`가 자동으로 HTTP 서버 모드로 동작합니다.
+
 Workers를 쓸 경우에는 `wrangler.toml` 또는 배포 변수에:
 
 - `PUBLIC_BASE_URL`
