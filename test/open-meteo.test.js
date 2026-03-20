@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { fetchForecastBundle } from "../src/open-meteo.js";
+import { fetchElevationAtPoint, fetchForecastBundle } from "../src/open-meteo.js";
 
 function buildWeatherPayload(timezone = "Asia/Seoul") {
   return {
@@ -107,4 +107,23 @@ test("fetchForecastBundle surfaces upstream air API failure instead of hiding it
     }),
     /air-quality-api\.open-meteo\.com/,
   );
+});
+
+test("fetchElevationAtPoint returns rounded elevation metadata", async () => {
+  const result = await fetchElevationAtPoint({
+    latitude: 37.4,
+    longitude: 128.5,
+    fetchImpl: async (url) => {
+      const hostname = new URL(url).hostname;
+      assert.equal(hostname, "api.open-meteo.com");
+      return createResponse({
+        elevation: [1123.7],
+      });
+    },
+  });
+
+  assert.equal(result.elevationM, 1124);
+  assert.equal(result.resolutionM, 90);
+  assert.equal(result.provider, "Open-Meteo Elevation API");
+  assert.match(result.sourceAttribution[0].url, /latitude=37\.4/);
 });

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { generateNightSkyReport } from "../src/scoring.js";
+import { buildPeakScoreWindows, generateNightSkyReport } from "../src/scoring.js";
 import { getAstronomyContext } from "../src/astronomy.js";
 
 function buildHour(time, overrides = {}) {
@@ -91,7 +91,7 @@ test("clear dry moonless-like conditions produce strong overall score", () => {
   ]);
 
   assert.ok(report.scores.overall_score >= 60);
-  assert.equal(report.derived_recommendations.go_no_go, "go");
+  assert.equal(report.derived_recommendations.mode_ready, true);
 });
 
 test("bright hazy conditions reduce transparency and readiness", () => {
@@ -139,7 +139,7 @@ test("high humidity and tiny spread trigger dew mitigation", () => {
     }),
   ]);
 
-  assert.equal(report.derived_recommendations.dew_heater_needed, true);
+  assert.ok(!Object.hasOwn(report.derived_recommendations, "dew_heater_needed"));
   assert.ok(report.risk_flags.includes("렌즈 결로 주의"));
 });
 
@@ -167,7 +167,7 @@ test("late clearing shifts best window toward dawn", () => {
     }),
   ]);
 
-  assert.equal(report.derived_recommendations.best_window.start, "2026-05-18T13:00:00Z");
+  assert.equal(report.derived_recommendations.best_window.start, "2026-05-18T14:00:00Z");
 });
 
 test("precipitation is treated as a hard fail", () => {
@@ -184,7 +184,7 @@ test("precipitation is treated as a hard fail", () => {
     }),
   ]);
 
-  assert.equal(report.derived_recommendations.go_no_go, "no_go");
+  assert.equal(report.derived_recommendations.mode_ready, false);
   assert.ok(report.hourly_conditions.every((hour) => hour.hard_fail_reasons.length > 0));
 });
 
@@ -298,10 +298,10 @@ test("hourly report preserves galactic core window through visibility context", 
     buildHour("2026-05-18T15:00:00Z"),
   ]);
 
-  assert.equal(report.astronomy_context.milky_way_peak_visible, true);
+  assert.ok(report.astronomy_context.galactic_core.visible_hours > 0);
   assert.ok(report.astronomy_context.galactic_core.best_window);
   assert.ok(report.hourly_conditions.some((hour) => hour.raw_inputs.galactic_core_altitude_degrees > 5));
-  assert.ok(report.hourly_conditions.some((hour) => hour.milky_way_ready || hour.raw_inputs.galactic_core_altitude_degrees >= 10));
+  assert.ok(report.hourly_conditions.some((hour) => hour.mode_ready || hour.raw_inputs.galactic_core_altitude_degrees >= 10));
 });
 
 test("milky way best window prefers the short galactic-core peak window", () => {
@@ -318,8 +318,297 @@ test("milky way best window prefers the short galactic-core peak window", () => 
   });
 
   assert.ok(report.derived_recommendations.best_window);
-  assert.equal(report.derived_recommendations.best_window.hour_count, 2);
-  assert.deepEqual(report.derived_recommendations.best_window, report.astronomy_context.galactic_core.best_window);
+  assert.equal(report.derived_recommendations.best_window.hour_count, 1);
+  assert.ok(Array.isArray(report.derived_recommendations.best_windows));
+  assert.equal(report.derived_recommendations.best_windows.length, 1);
+  assert.ok(report.astronomy_context.galactic_core.best_window);
+});
+
+test("milky way mode fails closed when the core rises into heavy cloud", () => {
+  const report = generateNightSkyReport({
+    latitude: 38.0231277684141,
+    longitude: 126.985877776443,
+    date: "2026-03-21",
+    timezone: "Asia/Seoul",
+    locationName: "Dangposeong Test Site",
+    siteProfile: { bortleClass: 5.3 },
+    mode: "wide_field_milky_way",
+    hourlyForecast: [
+      buildHour("2026-03-21T14:00:00Z", {
+        cloud_cover: 23,
+        cloud_cover_low: 0,
+        cloud_cover_mid: 8,
+        cloud_cover_high: 23,
+        visibility: 24140,
+        pm2_5: 40,
+        pm10: 50,
+        aerosol_optical_depth: 0.3,
+        european_aqi: 62,
+      }),
+      buildHour("2026-03-21T15:00:00Z", {
+        cloud_cover: 15,
+        cloud_cover_low: 0,
+        cloud_cover_mid: 5,
+        cloud_cover_high: 15,
+        visibility: 24140,
+        pm2_5: 40,
+        pm10: 50,
+        aerosol_optical_depth: 0.3,
+        european_aqi: 62,
+      }),
+      buildHour("2026-03-21T18:00:00Z", {
+        cloud_cover: 96,
+        cloud_cover_low: 0,
+        cloud_cover_mid: 37,
+        cloud_cover_high: 96,
+        visibility: 24140,
+        pm2_5: 42.7,
+        pm10: 52.3,
+        aerosol_optical_depth: 0.34,
+        european_aqi: 63,
+      }),
+      buildHour("2026-03-21T19:00:00Z", {
+        cloud_cover: 99,
+        cloud_cover_low: 0,
+        cloud_cover_mid: 69,
+        cloud_cover_high: 99,
+        visibility: 24140,
+        pm2_5: 42.1,
+        pm10: 51.3,
+        aerosol_optical_depth: 0.32,
+        european_aqi: 63,
+      }),
+    ],
+  });
+
+  assert.equal(report.derived_recommendations.mode_ready, false);
+  assert.equal(report.derived_recommendations.best_window, null);
+  assert.equal(report.window_rankings.milky_way_windows.length, 0);
+  assert.ok(report.hourly_conditions.every((hour) => hour.mode_ready === false));
+
+  const dawnHours = report.hourly_conditions.filter((hour) =>
+    ["2026-03-21T18:00:00Z", "2026-03-21T19:00:00Z"].includes(hour.time),
+  );
+  assert.ok(dawnHours.every((hour) => hour.mode_score < 60));
+});
+
+test("milky way mode stays deeply negative under extreme urban light pollution", () => {
+  const darkSite = generateReportByDate({
+    date: "2026-05-18",
+    time: "2026-05-18T14:00:00Z",
+    mode: "wide_field_milky_way",
+    siteProfile: { bortleClass: 3 },
+    hourlyForecast: [
+      buildHour("2026-05-18T12:00:00Z"),
+      buildHour("2026-05-18T13:00:00Z"),
+      buildHour("2026-05-18T14:00:00Z"),
+      buildHour("2026-05-18T15:00:00Z"),
+    ],
+  });
+  const urbanSite = generateReportByDate({
+    date: "2026-05-18",
+    time: "2026-05-18T14:00:00Z",
+    mode: "wide_field_milky_way",
+    siteProfile: { bortleClass: 9 },
+    hourlyForecast: [
+      buildHour("2026-05-18T12:00:00Z"),
+      buildHour("2026-05-18T13:00:00Z"),
+      buildHour("2026-05-18T14:00:00Z"),
+      buildHour("2026-05-18T15:00:00Z"),
+    ],
+  });
+
+  assert.equal(darkSite.derived_recommendations.mode_ready, true);
+  assert.ok(darkSite.window_rankings.milky_way_windows.length >= 1);
+
+  assert.equal(urbanSite.derived_recommendations.mode_ready, false);
+  assert.equal(urbanSite.derived_recommendations.best_window, null);
+  assert.equal(urbanSite.window_rankings.milky_way_windows.length, 0);
+  assert.ok(urbanSite.hourly_conditions.every((hour) => hour.mode_ready === false));
+  assert.ok(urbanSite.hourly_conditions.every((hour) => hour.mode_score === 0));
+  assert.equal(urbanSite.scores.mode_score, 0);
+  assert.ok(darkSite.scores.mode_score > urbanSite.scores.mode_score);
+});
+
+test("hoegi-style urban dawn keeps milky way score in the non-shootable range", () => {
+  const report = generateNightSkyReport({
+    latitude: 37.5897,
+    longitude: 127.0576,
+    date: "2026-03-20",
+    timezone: "Asia/Seoul",
+    locationName: "Hoegi Station Test Site",
+    siteProfile: { bortleClass: 8.8 },
+    mode: "wide_field_milky_way",
+    hourlyForecast: [
+      buildHour("2026-03-20T18:00:00Z", {
+        cloud_cover: 4,
+        cloud_cover_low: 2,
+        cloud_cover_mid: 3,
+        cloud_cover_high: 6,
+        visibility: 24000,
+        pm2_5: 12,
+        pm10: 18,
+        aerosol_optical_depth: 0.08,
+        european_aqi: 22,
+      }),
+      buildHour("2026-03-20T19:00:00Z", {
+        cloud_cover: 3,
+        cloud_cover_low: 1,
+        cloud_cover_mid: 2,
+        cloud_cover_high: 4,
+        visibility: 24000,
+        pm2_5: 12,
+        pm10: 18,
+        aerosol_optical_depth: 0.08,
+        european_aqi: 22,
+      }),
+      buildHour("2026-03-20T20:00:00Z", {
+        cloud_cover: 3,
+        cloud_cover_low: 1,
+        cloud_cover_mid: 2,
+        cloud_cover_high: 4,
+        visibility: 24000,
+        pm2_5: 12,
+        pm10: 18,
+        aerosol_optical_depth: 0.08,
+        european_aqi: 22,
+      }),
+    ],
+  });
+
+  assert.equal(report.derived_recommendations.mode_ready, false);
+  assert.equal(report.derived_recommendations.best_window, null);
+  assert.equal(report.window_rankings.milky_way_windows.length, 0);
+  assert.ok(report.hourly_conditions.every((hour) => hour.mode_score === 0));
+
+  const dawnHour = report.hourly_conditions.find((hour) => hour.time === "2026-03-20T19:00:00Z");
+  assert.ok(dawnHour);
+  assert.ok(dawnHour.raw_inputs.galactic_core_altitude_degrees >= 10);
+  assert.ok(dawnHour.cloud_score >= 90);
+  assert.ok(dawnHour.transparency_score >= 70);
+  assert.ok(dawnHour.darkness_score < 35);
+  assert.equal(dawnHour.mode_ready, false);
+  assert.equal(dawnHour.mode_score, 0);
+});
+
+test("urban broadband deep-sky reports a narrowband reference score alongside the practical score", () => {
+  const target = {
+    name: "Rosette Nebula",
+    raHours: 6 + 33 / 60,
+    decDegrees: 4 + 57 / 60,
+    source: "catalog",
+    category: "deep_sky",
+  };
+  const report = generateNightSkyReport({
+    latitude: 37.5665,
+    longitude: 126.978,
+    date: "2026-01-15",
+    timezone: "Asia/Seoul",
+    locationName: "Seoul Urban Test Site",
+    siteProfile: { bortleClass: 8.3 },
+    mode: "broadband_deep_sky",
+    target,
+    hourlyForecast: [
+      buildHour("2026-01-15T12:00:00Z"),
+      buildHour("2026-01-15T13:00:00Z"),
+      buildHour("2026-01-15T14:00:00Z"),
+    ],
+  });
+
+  assert.equal(report.scores.active_mode, "broadband_deep_sky");
+  assert.equal(report.scores.mode_score, 0);
+  assert.ok(report.scores.reference_mode_score !== null);
+  assert.equal(report.scores.reference_mode_score_context?.mode, "narrowband_deep_sky");
+  assert.match(report.scores.reference_mode_score_context?.label ?? "", /협대역/);
+  assert.ok(report.hourly_conditions.every((hour) => hour.mode_score === 0));
+  assert.ok(report.hourly_conditions.every((hour) => typeof hour.reference_mode_score === "number"));
+});
+
+test("milky way mode goes positive only when a truly shootable hour exists", () => {
+  const report = generateReportByDate({
+    date: "2026-05-18",
+    time: "2026-05-18T14:00:00Z",
+    mode: "wide_field_milky_way",
+    hourlyForecast: [
+      buildHour("2026-05-18T12:00:00Z"),
+      buildHour("2026-05-18T13:00:00Z"),
+      buildHour("2026-05-18T14:00:00Z"),
+      buildHour("2026-05-18T15:00:00Z"),
+    ],
+  });
+
+  assert.equal(report.derived_recommendations.mode_ready, true);
+  assert.ok(report.hourly_conditions.some((hour) => hour.mode_ready));
+  assert.ok(report.derived_recommendations.best_window);
+  assert.ok(report.window_rankings.milky_way_windows.length >= 1);
+});
+
+test("buildPeakScoreWindows returns a single-hour peak when one hour is highest", () => {
+  const windows = buildPeakScoreWindows(
+    [
+      { time: "2026-05-18T12:00:00Z", mode_score: 71, astronomicalNight: true, hard_fail_reasons: [] },
+      { time: "2026-05-18T13:00:00Z", mode_score: 83, astronomicalNight: true, hard_fail_reasons: [] },
+      { time: "2026-05-18T14:00:00Z", mode_score: 79, astronomicalNight: true, hard_fail_reasons: [] },
+    ],
+    { scoreField: "mode_score" },
+  );
+
+  assert.deepEqual(windows, [
+    {
+      start: "2026-05-18T13:00:00Z",
+      end: "2026-05-18T13:00:00Z",
+      average_score: 83,
+      hour_count: 1,
+    },
+  ]);
+});
+
+test("buildPeakScoreWindows merges consecutive tied peak hours into one range", () => {
+  const windows = buildPeakScoreWindows(
+    [
+      { time: "2026-05-18T12:00:00Z", mode_score: 74, astronomicalNight: true, hard_fail_reasons: [] },
+      { time: "2026-05-18T13:00:00Z", mode_score: 82, astronomicalNight: true, hard_fail_reasons: [] },
+      { time: "2026-05-18T14:00:00Z", mode_score: 82, astronomicalNight: true, hard_fail_reasons: [] },
+      { time: "2026-05-18T15:00:00Z", mode_score: 77, astronomicalNight: true, hard_fail_reasons: [] },
+    ],
+    { scoreField: "mode_score" },
+  );
+
+  assert.deepEqual(windows, [
+    {
+      start: "2026-05-18T13:00:00Z",
+      end: "2026-05-18T14:00:00Z",
+      average_score: 82,
+      hour_count: 2,
+    },
+  ]);
+});
+
+test("buildPeakScoreWindows preserves split tied peak ranges", () => {
+  const windows = buildPeakScoreWindows(
+    [
+      { time: "2026-05-18T12:00:00Z", mode_score: 81, astronomicalNight: true, hard_fail_reasons: [] },
+      { time: "2026-05-18T13:00:00Z", mode_score: 79, astronomicalNight: true, hard_fail_reasons: [] },
+      { time: "2026-05-18T14:00:00Z", mode_score: 81, astronomicalNight: true, hard_fail_reasons: [] },
+      { time: "2026-05-18T15:00:00Z", mode_score: 81, astronomicalNight: true, hard_fail_reasons: [] },
+    ],
+    { scoreField: "mode_score" },
+  );
+
+  assert.deepEqual(windows, [
+    {
+      start: "2026-05-18T12:00:00Z",
+      end: "2026-05-18T12:00:00Z",
+      average_score: 81,
+      hour_count: 1,
+    },
+    {
+      start: "2026-05-18T14:00:00Z",
+      end: "2026-05-18T15:00:00Z",
+      average_score: 81,
+      hour_count: 2,
+    },
+  ]);
 });
 
 test("report exposes score curve, blocker timeline, and ranked windows", () => {
@@ -439,8 +728,10 @@ test("deep-sky target-altitude cap and cloud impact are still enforced for narro
     })],
   });
 
-  assert.ok(brightLowAlt.hourly_conditions[0].target_context.altitude_score < 45);
-  assert.equal(brightLowAlt.hourly_conditions[0].mode_score, 50);
+  assert.ok(
+    brightLowAlt.hourly_conditions[0].target_context.altitude_score
+      < brightHighAlt.hourly_conditions[0].target_context.altitude_score,
+  );
   assert.ok(brightHighAlt.hourly_conditions[0].target_context.altitude_score > 80);
   assert.ok(brightHighAlt.hourly_conditions[0].mode_score > brightLowAlt.hourly_conditions[0].mode_score);
   assert.ok(highAltCloudy.hourly_conditions[0].cloud_score < brightHighAlt.hourly_conditions[0].cloud_score);
@@ -469,4 +760,61 @@ test("deep-sky modes include target altitude in mode context", () => {
   assert.ok(report.hourly_conditions.some((hour) => hour.target_context !== null));
   assert.ok(report.hourly_conditions.some((hour) => typeof hour.mode_score === "number"));
   assert.equal(typeof report.derived_recommendations.mode_ready, "boolean");
+});
+
+test("same conditions score lower as bortle class brightens across mode caps", () => {
+  const hourly = [
+    buildHour("2026-05-18T12:00:00Z"),
+    buildHour("2026-05-18T13:00:00Z"),
+    buildHour("2026-05-18T14:00:00Z"),
+  ];
+
+  const dark = generateReport(hourly, { bortleClass: 2 }, { mode: "general" });
+  const suburban = generateReport(hourly, { bortleClass: 5 }, { mode: "general" });
+  const urban = generateReport(hourly, { bortleClass: 8 }, { mode: "general" });
+
+  assert.ok(dark.scores.mode_score > suburban.scores.mode_score);
+  assert.ok(suburban.scores.mode_score > urban.scores.mode_score);
+  assert.ok(urban.scores.mode_score <= 24);
+});
+
+test("elevation gives only a modest transparency and dew advantage", () => {
+  const hourly = [buildHour("2026-05-18T12:00:00Z", {
+    pm2_5: 18,
+    pm10: 24,
+    aerosol_optical_depth: 0.18,
+    relative_humidity_2m: 82,
+    dew_point_2m: 4.5,
+  })];
+
+  const lowElevation = generateReport(hourly, { bortleClass: 3, elevationM: 120 });
+  const highElevation = generateReport(hourly, { bortleClass: 3, elevationM: 1650 });
+
+  assert.ok(highElevation.scores.transparency_score > lowElevation.scores.transparency_score);
+  assert.ok(highElevation.scores.dew_risk_score > lowElevation.scores.dew_risk_score);
+  assert.equal(highElevation.scores.darkness_score, lowElevation.scores.darkness_score);
+});
+
+test("heavy total cloud stays heavily penalized even without low cloud", () => {
+  const clear = generateReport([buildHour("2026-05-18T12:00:00Z")], { bortleClass: 3 }, { mode: "general" });
+  const overcast = generateReport([buildHour("2026-05-18T12:00:00Z", {
+    cloud_cover: 88,
+    cloud_cover_low: 0,
+    cloud_cover_mid: 25,
+    cloud_cover_high: 92,
+  })], { bortleClass: 3 }, { mode: "general" });
+
+  assert.ok(overcast.hourly_conditions[0].cloud_score < clear.hourly_conditions[0].cloud_score);
+  assert.ok(overcast.hourly_conditions[0].cloud_score <= 25);
+  assert.ok(overcast.scores.mode_score < clear.scores.mode_score);
+});
+
+test("general mode no longer emits milky-way-specific risk flags by default", () => {
+  const report = generateReport([
+    buildHour("2026-05-18T12:00:00Z"),
+    buildHour("2026-05-18T13:00:00Z"),
+    buildHour("2026-05-18T14:00:00Z"),
+  ], { bortleClass: 3 }, { mode: "general" });
+
+  assert.deepEqual(report.risk_flags, []);
 });

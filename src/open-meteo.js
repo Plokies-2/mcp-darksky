@@ -2,6 +2,7 @@ import { fetchWithRetries } from "./retry-fetch.js";
 
 const WEATHER_API_BASE = "https://api.open-meteo.com/v1/forecast";
 const AIR_API_BASE = "https://air-quality-api.open-meteo.com/v1/air-quality";
+const ELEVATION_API_BASE = "https://api.open-meteo.com/v1/elevation";
 
 const WEATHER_HOURLY_PARAMS = [
   "temperature_2m",
@@ -188,5 +189,36 @@ export async function fetchForecastBundle({
         : []),
     ],
     airQualityIncluded: Boolean(airUrl && airData),
+  };
+}
+
+export async function fetchElevationAtPoint({
+  latitude,
+  longitude,
+  fetchImpl = fetch,
+}) {
+  const elevationUrl = buildUrl(ELEVATION_API_BASE, {
+    latitude,
+    longitude,
+  });
+  const payload = await fetchJson(elevationUrl, { fetchImpl });
+  const elevationValue = Array.isArray(payload?.elevation) ? Number(payload.elevation[0]) : Number.NaN;
+
+  if (!Number.isFinite(elevationValue)) {
+    throw new Error("Elevation provider returned no usable elevation value.");
+  }
+
+  return {
+    elevationM: Math.round(elevationValue),
+    resolutionM: 90,
+    provider: "Open-Meteo Elevation API",
+    dataset: "Copernicus DEM 2021 GLO-90",
+    sourceAttribution: [
+      {
+        provider: "Open-Meteo Elevation API",
+        url: elevationUrl.toString(),
+        detail: "Elevation from Copernicus DEM 2021 GLO-90 (90 m resolution).",
+      },
+    ],
   };
 }

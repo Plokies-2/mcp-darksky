@@ -1,16 +1,16 @@
 import "dotenv/config";
-import { randomUUID } from "node:crypto";
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
+import {
+  getCachedLightPollutionReport,
+  getCachedNightSkyOutlookReport,
+  getCachedNightSkyScoreReport,
+} from "./cached-reports.js";
 import { createDarkSkyServer } from "./server.js";
 import {
   buildPromptPage,
   buildPromptText,
   getLightPollutionMethodologyReport,
-  getLightPollutionReport,
-  getNightSkyOutlookReport,
-  getNightSkyScoreReport,
   parseLightPollutionQuery,
   parseOutlookQuery,
   parseScoreQuery,
@@ -18,7 +18,7 @@ import {
 import { buildHomePage, buildInstallPage } from "./web-ui.js";
 
 const port = Number(process.env.PORT ?? process.env.MCP_PORT ?? 3000);
-const host = process.env.HOST ?? "0.0.0.0";
+const host = process.env.HOST ?? "127.0.0.1";
 const publicBaseUrl = process.env.PUBLIC_BASE_URL ?? `http://localhost:${port}`;
 const kakaoRestApiKey = process.env.KAKAO_REST_API_KEY ?? process.env.REST_API_KEY;
 
@@ -28,11 +28,6 @@ const app = createMcpExpressApp({
     ? process.env.ALLOWED_HOSTS.split(",").map((value) => value.trim()).filter(Boolean)
     : undefined,
 });
-
-const transports = {};
-const scoreCache = new Map();
-const SCORE_CACHE_TTL_MS = 15 * 60 * 1000;
-
 app.get("/health", (_req, res) => {
   res.json({
     ok: true,
@@ -59,33 +54,18 @@ app.get("/prompt.txt", (_req, res) => {
 
 app.get("/api/score", async (req, res) => {
   try {
-    const cacheKey = JSON.stringify(
-      Object.entries(req.query)
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([key, value]) => [key, value]),
-    );
-    const cached = scoreCache.get(cacheKey);
-    if (cached && cached.expiresAt > Date.now()) {
-      res.setHeader("X-Cache", "HIT");
-      res.json(cached.payload);
-      return;
-    }
-
     const input = parseScoreQuery(req.query);
-    const report = await getNightSkyScoreReport({
+    const { report, cacheStatus } = await getCachedNightSkyScoreReport({
       ...input,
       kakaoRestApiKey,
       publicBaseUrl,
     });
     if (report.report_kind === "fallback_required") {
+      res.setHeader("X-Cache", cacheStatus);
       res.status(409).json(report);
       return;
     }
-    scoreCache.set(cacheKey, {
-      expiresAt: Date.now() + SCORE_CACHE_TTL_MS,
-      payload: report,
-    });
-    res.setHeader("X-Cache", "MISS");
+    res.setHeader("X-Cache", cacheStatus);
     res.json(report);
   } catch (error) {
     if (error?.name === "ZodError") {
@@ -124,10 +104,11 @@ app.get("/api/score", async (req, res) => {
 app.get("/api/score-outlook", async (req, res) => {
   try {
     const input = parseOutlookQuery(req.query);
-    const report = await getNightSkyOutlookReport({
+    const { report, cacheStatus } = await getCachedNightSkyOutlookReport({
       ...input,
       kakaoRestApiKey,
     });
+    res.setHeader("X-Cache", cacheStatus);
     res.json(report);
   } catch (error) {
     if (error?.name === "ZodError") {
@@ -166,10 +147,11 @@ app.get("/api/score-outlook", async (req, res) => {
 app.get("/api/light-pollution", async (req, res) => {
   try {
     const input = parseLightPollutionQuery(req.query);
-    const report = await getLightPollutionReport({
+    const { report, cacheStatus } = await getCachedLightPollutionReport({
       ...input,
       kakaoRestApiKey,
     });
+    res.setHeader("X-Cache", cacheStatus);
     res.json(report);
   } catch (error) {
     if (error?.name === "ZodError") {
@@ -205,45 +187,21 @@ app.get("/api/light-pollution/method", (_req, res) => {
   res.json(getLightPollutionMethodologyReport());
 });
 
-async function handleSessionRequest(req, res) {
-  const sessionId = req.headers["mcp-session-id"];
-
-  try {
-    let transport;
-
-    if (sessionId && transports[sessionId]) {
-      transport = transports[sessionId];
-    } else if (!sessionId && isInitializeRequest(req.body)) {
-      transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: () => randomUUID(),
-        onsessioninitialized: (newSessionId) => {
-          transports[newSessionId] = transport;
-        },
-      });
-
-      transport.onclose = () => {
-        const activeSessionId = transport.sessionId;
-        if (activeSessionId && transports[activeSessionId]) {
-          delete transports[activeSessionId];
-        }
-      };
-
-      const server = createDarkSkyServer({ publicBaseUrl, kakaoRestApiKey });
-      await server.connect(transport);
-      await transport.handleRequest(req, res, req.body);
-      return;
-    } else {
-      res.status(400).json({
-        jsonrpc: "2.0",
-        error: {
-          code: -32000,
-          message: "Bad Request: missing or invalid MCP session",
-        },
-        id: null,
-      });
-      return;
+async function handleStatelessMcpRequest(req, res) {
+  const transport = new StreamableHTTPServerTransport({
+    sessionIdGenerator: undefined,
+  });
+  const server = createDarkSkyServer({ publicBaseUrl, kakaoRestApiKey });
+  res.on("close", () => {
+    if (typeof transport.close === "function") {
+      transport.close().catch(() => {});
     }
-
+    if (typeof server.close === "function") {
+      server.close().catch(() => {});
+    }
+  });
+  try {
+    await server.connect(transport);
     await transport.handleRequest(req, res, req.body);
   } catch (error) {
     console.error("Error handling MCP request:", error);
@@ -260,28 +218,25 @@ async function handleSessionRequest(req, res) {
   }
 }
 
-app.post("/mcp", handleSessionRequest);
+app.post("/mcp", handleStatelessMcpRequest);
 
-app.get("/mcp", async (req, res) => {
-  const sessionId = req.headers["mcp-session-id"];
+function sendMcpMethodNotAllowed(res) {
+  res.status(405).json({
+    jsonrpc: "2.0",
+    error: {
+      code: -32000,
+      message: "Method not allowed.",
+    },
+    id: null,
+  });
+}
 
-  if (!sessionId || !transports[sessionId]) {
-    res.status(400).send("Invalid or missing session ID");
-    return;
-  }
-
-  await transports[sessionId].handleRequest(req, res);
+app.get("/mcp", (_req, res) => {
+  sendMcpMethodNotAllowed(res);
 });
 
-app.delete("/mcp", async (req, res) => {
-  const sessionId = req.headers["mcp-session-id"];
-
-  if (!sessionId || !transports[sessionId]) {
-    res.status(400).send("Invalid or missing session ID");
-    return;
-  }
-
-  await transports[sessionId].handleRequest(req, res);
+app.delete("/mcp", (_req, res) => {
+  sendMcpMethodNotAllowed(res);
 });
 
 const listener = app.listen(port, host, () => {
@@ -290,11 +245,6 @@ const listener = app.listen(port, host, () => {
 });
 
 async function shutdown() {
-  for (const sessionId of Object.keys(transports)) {
-    await transports[sessionId].close();
-    delete transports[sessionId];
-  }
-
   listener.close(() => process.exit(0));
 }
 

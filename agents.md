@@ -64,3 +64,26 @@
   - mountain dark sites repeatedly show the same one-sided bias
   - the benchmark set grows and terrain-correlated error still remains
   - the estimator is being upgraded from a heuristic Bortle-like proxy to a fuller zenith sky-brightness propagation model
+
+## Derived Parameter Discipline
+
+- Do not add new derived output parameters, aliases, or convenience booleans unless the user explicitly asks for them.
+- Prefer one canonical verdict field over multiple overlapping `*_ready`, `go_no_go`, or `*_safe` fields.
+- If a new derived field seems useful, propose it first instead of silently adding it to the contract.
+- Keep internal helper booleans private when possible; do not expose them in API/widget output unless they are required for a user-facing workflow.
+- Apply the same rule to subagents and parallel workers. No delegated agent should add new derived output parameters unless the user explicitly requested them.
+
+## GPT API + MCP Validation
+
+- When the user asks for a real end-to-end GPT API check, prefer a one-shot inline Node script piped to `node -` instead of creating a temporary file.
+- Remote MCP in the Responses API cannot reach `localhost`; expose the local server through a temporary public tunnel first.
+- In the same inline script, do the full flow:
+  1. start a tunnel
+  2. start `src/http.js` with `PUBLIC_BASE_URL` set to the tunnel URL
+  3. set `ALLOWED_HOSTS` to include `127.0.0.1`, `localhost`, and the tunnel host
+  4. call `https://api.openai.com/v1/responses` with the MCP tool configured
+  5. print the MCP call arguments, output item types, and final text
+  6. always kill the tunnel and server processes in `finally`
+- For Korean prompts inside inline PowerShell or Node snippets, prefer Unicode escapes so the shell does not corrupt the place name or user prompt.
+- If the model miscalls the MCP tool, strengthen the API `instructions` with exact tool-call constraints and rerun the same inline script instead of creating helper files.
+- For any direct-connection validation result, show the full response body by default instead of only a summary. This includes Responses API outputs, MCP call payloads, and real HTTP responses.

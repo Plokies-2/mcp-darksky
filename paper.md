@@ -715,3 +715,115 @@ So the current rule is:
   - the benchmark set grows and still shows terrain-correlated error
   - or we move from a heuristic Bortle-like proxy toward a fuller zenith sky
     brightness propagation model
+
+## 17. 2026-03 Paper-backed scoring refresh
+
+This section records the sources used for the March 2026 scoring refresh and
+what changed in the score model because of them.
+
+### 17.1 Urban light-pollution caps
+
+Primary sources:
+
+- Falchi et al. 2016, world atlas of artificial night sky brightness
+  - https://pmc.ncbi.nlm.nih.gov/articles/PMC4928945/
+- Kyba et al. / Scientific Reports 2023, medium-sized Central European cities
+  - https://www.nature.com/articles/s41598-023-44423-w
+- Barentine et al. style photometric threshold discussion for Milky Way
+  visibility
+  - https://arxiv.org/abs/2002.04435
+
+How the model uses this:
+
+- `wide_field_milky_way` is now treated as effectively non-shootable by
+  `Bortle >= 8`
+- `broadband_deep_sky` is also treated as non-shootable by `Bortle >= 8`
+  without a specialized mitigation path
+- `general` and other modes now use explicit Bortle-band score caps instead of
+  only ad-hoc city exceptions
+
+Rationale:
+
+- the literature consistently places Milky Way visibility far darker than urban
+  `Bortle 8-9`
+- very bright urban skyglow can make faint-object astronomy practically
+  impossible even when cloud and moon conditions improve
+
+### 17.2 Target altitude and airmass
+
+Operational source:
+
+- Kasten and Young 1989 airmass approximation, widely used in astronomy site
+  and extinction calculations
+
+How the model uses this:
+
+- target altitude scoring now uses an airmass-shaped curve instead of only a
+  coarse linear altitude ramp
+- low-altitude targets are penalized more consistently, especially for
+  deep-sky modes
+
+Rationale:
+
+- extinction and background path length grow rapidly at low altitude, so a
+  target just above the horizon should not score similarly to a target at
+  moderate or high altitude
+
+### 17.3 Aerosol / transparency weighting
+
+Primary idea sources:
+
+- the same urban-sky literature above
+- practical extinction / transparency reasoning from observatory site work,
+  where aerosol load and visibility matter more than minor support factors
+
+How the model uses this:
+
+- `calculateTransparencyScore` now weights `AOD`, PM, dust, AQI, and visibility
+  more aggressively
+- transparency remains secondary to cloud and darkness for Milky Way, but it
+  still matters for the final cap and readiness gate
+
+### 17.4 Elevation auto-fill and modest score effect
+
+Data source:
+
+- Open-Meteo Elevation API
+  - https://open-meteo.com/en/docs/elevation-api
+
+Dataset note:
+
+- Open-Meteo documents that the elevation endpoint uses Copernicus DEM 2021
+  release `GLO-90`
+
+How the model uses this:
+
+- when the caller does not provide `site_profile.elevation_m`, the service now
+  auto-fetches elevation from Open-Meteo
+- elevation is only a small modifier:
+  - slight transparency bonus
+  - slight dew-risk bonus
+- elevation does not override Bortle-based darkness or urban caps
+
+Rationale:
+
+- higher sites can modestly improve transparency and reduce low-boundary-layer
+  moisture effects
+- but elevation is not strong enough to rescue urban `Bortle 8-9` Milky Way or
+  broadband deep-sky conditions
+
+### 17.5 Implementation summary
+
+Files updated during this refresh:
+
+- `src/scoring.js`
+- `src/service.js`
+- `src/open-meteo.js`
+- `test/scoring.test.js`
+- `test/open-meteo.test.js`
+
+Design rule:
+
+- use literature to shape score ordering and caps
+- keep exact point values as conservative product policy, not as a claim that
+  the score is a direct physical measurement

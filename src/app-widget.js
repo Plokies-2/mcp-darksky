@@ -79,17 +79,31 @@ function buildWidgetScript() {
     const location = report.location || {};
     const forecast = report.forecast_time_range || {};
     const pollution = report.light_pollution_context || {};
+    const detailResource = report.detail_resource || null;
+    const referenceContext = scores.reference_mode_score_context || null;
+    const referenceModeScore =
+      scores.reference_mode_score !== undefined && scores.reference_mode_score !== null
+        ? formatNumber(scores.reference_mode_score)
+        : null;
+    const primaryVerdict =
+      derived.mode_ready === true
+        ? "shootable"
+        : derived.mode_ready === false
+          ? "not recommended"
+          : "planning summary available below.";
 
     return ''
       + '<section class="panel hero">'
       + '<div class="eyebrow">Night sky score</div>'
       + '<h1>' + escapeHtml(location.name || "Requested location") + '</h1>'
-      + '<p class="lede">Overall ' + escapeHtml(formatNumber(scores.overall_score)) + ' with mode score ' + escapeHtml(formatNumber(scores.mode_score)) + '. ' + escapeHtml(derived.go_no_go || "Planning summary available below.") + '</p>'
+      + '<p class="lede">Primary verdict: ' + escapeHtml(primaryVerdict) + '. Overall ' + escapeHtml(formatNumber(scores.overall_score)) + ' with mode score ' + escapeHtml(formatNumber(scores.mode_score)) + (referenceContext && referenceModeScore ? ' (' + escapeHtml(referenceContext.label) + ' ' + escapeHtml(referenceModeScore) + ')' : '') + '.</p>'
       + '<div class="hero-grid">'
       + renderKeyValue("Forecast window", formatDateTime(forecast.start) + ' to ' + formatDateTime(forecast.end))
       + renderKeyValue("Mode", scores.active_mode || report.mode || "general")
       + renderKeyValue("Darkness", scores.darkness_score !== undefined ? formatNumber(scores.darkness_score) : "n/a")
       + renderKeyValue("Cloud", scores.cloud_score !== undefined ? formatNumber(scores.cloud_score) : "n/a")
+      + (detailResource ? renderKeyValue("Detail resource", detailResource.uri || "n/a") : '')
+      + (referenceContext && referenceModeScore ? renderKeyValue("Urban reference", referenceContext.mode_label + ' ' + referenceModeScore) : '')
       + '</div>'
       + '</section>'
       + '<section class="grid">'
@@ -102,10 +116,9 @@ function buildWidgetScript() {
       + '</section>'
       + '<section class="grid two-up">'
       + '<article class="panel"><div class="section-title">Derived recommendations</div><dl class="list">'
+      + (derived.mode_ready !== undefined ? '<div><dt>Primary ready</dt><dd>' + escapeHtml(String(derived.mode_ready)) + '</dd></div>' : "")
       + (derived.best_window ? '<div><dt>Best window</dt><dd>' + escapeHtml(derived.best_window) + '</dd></div>' : "")
       + (derived.mode_best_window ? '<div><dt>Mode window</dt><dd>' + escapeHtml(derived.mode_best_window) + '</dd></div>' : "")
-      + (derived.milky_way_ready !== undefined ? '<div><dt>Milky Way ready</dt><dd>' + escapeHtml(String(derived.milky_way_ready)) + '</dd></div>' : "")
-      + (derived.deep_sky_ready !== undefined ? '<div><dt>Deep sky ready</dt><dd>' + escapeHtml(String(derived.deep_sky_ready)) + '</dd></div>' : "")
       + '</dl></article>'
       + '<article class="panel"><div class="section-title">Light pollution</div><dl class="list">'
       + (pollution.estimated_bortle_center !== undefined ? '<div><dt>Estimated Bortle center</dt><dd>' + escapeHtml(formatNumber(pollution.estimated_bortle_center)) + '</dd></div>' : "")
@@ -118,6 +131,7 @@ function buildWidgetScript() {
   function renderFallbackReport(report) {
     const detailPolicy = report.detail_policy || {};
     const recommendedInput = report.recommended_input || {};
+    const detailResource = report.detail_resource || null;
     return ''
       + '<section class="panel hero">'
       + '<div class="eyebrow">Night sky score</div>'
@@ -128,6 +142,7 @@ function buildWidgetScript() {
       + renderKeyValue("Detail level", detailPolicy.detail_level || "reduced")
       + renderKeyValue("Days ahead", detailPolicy.days_ahead !== undefined ? String(detailPolicy.days_ahead) : "n/a")
       + renderKeyValue("Reason", report.reason || "n/a")
+      + (detailResource ? renderKeyValue("Detail resource", detailResource.uri || "n/a") : '')
       + '</div>'
       + '</section>'
       + '<section class="grid two-up">'
@@ -150,6 +165,14 @@ function buildWidgetScript() {
     const windows = report.window_rankings || {};
     const include = report.what_is_included || [];
     const reduced = report.what_is_reduced || [];
+    const detailResource = report.detail_resource || null;
+
+    const primaryVerdict =
+      summary.mode_ready === true
+        ? "shootable"
+        : summary.mode_ready === false
+          ? "not recommended"
+          : "planning summary available below.";
 
     return ''
       + '<section class="panel hero">'
@@ -157,10 +180,11 @@ function buildWidgetScript() {
       + '<h1>' + escapeHtml(report.location && report.location.name ? report.location.name : "Requested location") + '</h1>'
       + '<p class="lede">Coarse planning view for ' + escapeHtml(summary.active_mode || "general") + ' mode. Overall outlook score ' + escapeHtml(formatNumber(summary.overall_outlook_score)) + '.</p>'
       + '<div class="hero-grid">'
-      + renderKeyValue("Go / no-go", summary.go_no_go_outlook || "n/a")
+      + renderKeyValue("Primary verdict", primaryVerdict)
       + renderKeyValue("Block count", String(blocks.length))
       + renderKeyValue("Air quality", include.some((item) => String(item).includes("air quality")) ? "included" : "skipped")
       + renderKeyValue("Detail level", report.detail_policy && report.detail_policy.detail_level ? report.detail_policy.detail_level : "coarse")
+      + (detailResource ? renderKeyValue("Detail resource", detailResource.uri || "n/a") : '')
       + '</div>'
       + '</section>'
       + '<section class="grid two-up">'
@@ -181,6 +205,7 @@ function buildWidgetScript() {
     const context = report.light_pollution_context || {};
     const location = report.location || {};
     const firstSource = report.source_attribution && report.source_attribution.length ? report.source_attribution[0].provider : "n/a";
+    const detailResource = report.detail_resource || null;
 
     return ''
       + '<section class="panel hero">'
@@ -192,6 +217,7 @@ function buildWidgetScript() {
       + renderKeyValue("Methodology", report.methodology_version || "n/a")
       + renderKeyValue("Resolved from", location.resolved_from || "n/a")
       + renderKeyValue("Source", firstSource)
+      + (detailResource ? renderKeyValue("Detail resource", detailResource.uri || "n/a") : '')
       + '</div>'
       + '</section>'
       + '<section class="grid two-up">'

@@ -3,9 +3,15 @@ import { fetchForecastBundle } from "./open-meteo.js";
 import { getEstimatedLightPollution } from "./light-pollution.js";
 import { getLightPollutionMethodology } from "./light-pollution-methodology.js";
 import { resolveObservationIntent } from "./observation-intent.js";
-import { resolvePlaceQuery } from "./kakao-local.js";
+import {
+  attachObservationResolution,
+  resolveEffectiveSiteProfile,
+  resolveObservationPoint,
+} from "./observation-point.js";
 import { generateNightSkyReport } from "./scoring.js";
 import { resolveTargetInput } from "./targets.js";
+
+export { reconcileObservationPoint } from "./observation-point.js";
 
 const siteProfileSchema = z
   .object({
@@ -113,85 +119,6 @@ function attachRequestContext(report, intent, resolvedTarget) {
   };
 
   return report;
-}
-
-function round(value, digits = 1) {
-  const factor = 10 ** digits;
-  return Math.round(value * factor) / factor;
-}
-
-function calculateDistanceKm(latitudeA, longitudeA, latitudeB, longitudeB) {
-  const toRadians = (degrees) => degrees * (Math.PI / 180);
-  const earthRadiusKm = 6371;
-  const dLat = toRadians(latitudeB - latitudeA);
-  const dLon = toRadians(longitudeB - longitudeA);
-  const lat1 = toRadians(latitudeA);
-  const lat2 = toRadians(latitudeB);
-  const a =
-    Math.sin(dLat / 2) ** 2
-    + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
-
-  return 2 * earthRadiusKm * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-export function reconcileObservationPoint(parsed, resolvedPlace = null, conflictThresholdKm = 20) {
-  const hasCoordinates = parsed.latitude !== undefined && parsed.longitude !== undefined;
-
-  if (hasCoordinates && resolvedPlace) {
-    const distanceKm = calculateDistanceKm(
-      parsed.latitude,
-      parsed.longitude,
-      resolvedPlace.latitude,
-      resolvedPlace.longitude,
-    );
-
-    if (distanceKm > conflictThresholdKm) {
-      return {
-        latitude: resolvedPlace.latitude,
-        longitude: resolvedPlace.longitude,
-        locationName: parsed.location_name ?? resolvedPlace.locationName,
-        resolvedFrom: "place_query",
-        resolvedPlace,
-        inputCoordinates: {
-          latitude: parsed.latitude,
-          longitude: parsed.longitude,
-        },
-        coordinateConflictKm: round(distanceKm),
-        coordinatesOverriddenByPlaceQuery: true,
-      };
-    }
-
-    return {
-      latitude: parsed.latitude,
-      longitude: parsed.longitude,
-      locationName: parsed.location_name ?? resolvedPlace.locationName,
-      resolvedFrom: "coordinates",
-      resolvedPlace,
-      coordinateMatchKm: round(distanceKm),
-      coordinatesOverriddenByPlaceQuery: false,
-    };
-  }
-
-  if (hasCoordinates) {
-    return {
-      latitude: parsed.latitude,
-      longitude: parsed.longitude,
-      locationName: parsed.location_name,
-      resolvedFrom: "coordinates",
-    };
-  }
-
-  if (!resolvedPlace) {
-    throw new Error("resolvedPlace is required when coordinates are not available.");
-  }
-
-  return {
-    latitude: resolvedPlace.latitude,
-    longitude: resolvedPlace.longitude,
-    locationName: parsed.location_name ?? resolvedPlace.locationName,
-    resolvedFrom: "place_query",
-    resolvedPlace,
-  };
 }
 
 export const lightPollutionInputSchema = z
@@ -667,52 +594,6 @@ function buildDistantFallbackPayload(parsed, publicBaseUrl = null) {
   return fallback;
 }
 
-async function resolveObservationPoint(parsed, kakaoRestApiKey) {
-  const hasCoordinates = parsed.latitude !== undefined && parsed.longitude !== undefined;
-  const canResolvePlace = Boolean(parsed.place_query) && Boolean(kakaoRestApiKey);
-
-  if (canResolvePlace) {
-    const resolved = await resolvePlaceQuery({
-      query: parsed.place_query,
-      restApiKey: kakaoRestApiKey,
-    });
-
-    return reconcileObservationPoint(parsed, resolved);
-  }
-
-  if (hasCoordinates) {
-    return reconcileObservationPoint(parsed);
-  }
-
-  const resolved = await resolvePlaceQuery({
-    query: parsed.place_query,
-    restApiKey: kakaoRestApiKey,
-  });
-
-  return reconcileObservationPoint(parsed, resolved);
-}
-
-function attachObservationResolution(location, observationPoint, placeQuery) {
-  if (observationPoint.resolvedPlace) {
-    location.resolved_from = observationPoint.resolvedFrom;
-    location.place_query = placeQuery;
-    location.resolved_place = {
-      address_name: observationPoint.resolvedPlace.addressName,
-      road_address_name: observationPoint.resolvedPlace.roadAddressName,
-      place_name: observationPoint.resolvedPlace.placeName,
-      provider: observationPoint.resolvedPlace.provider,
-    };
-  }
-
-  if (observationPoint.coordinatesOverriddenByPlaceQuery) {
-    location.input_coordinates = observationPoint.inputCoordinates;
-    location.coordinate_conflict_km = observationPoint.coordinateConflictKm;
-    location.coordinate_resolution = "place_query_overrode_conflicting_coordinates";
-  } else if (observationPoint.coordinateMatchKm !== undefined) {
-    location.coordinate_match_km = observationPoint.coordinateMatchKm;
-  }
-}
-
 export async function getLightPollutionReport(input) {
   const parsed = lightPollutionInputSchema.parse(input);
   const observationPoint = await resolveObservationPoint(parsed, input.kakaoRestApiKey);
@@ -766,6 +647,7 @@ export async function getNightSkyScoreReport(input) {
   }
 
   const observationPoint = await resolveObservationPoint(parsed, input.kakaoRestApiKey);
+  const effectiveSiteProfile = await resolveEffectiveSiteProfile(parsed.site_profile, observationPoint);
   let lightPollutionEstimate = null;
   try {
     lightPollutionEstimate = await getEstimatedLightPollution({
@@ -798,13 +680,9 @@ export async function getNightSkyScoreReport(input) {
     timezone: forecastBundle.timezone,
     locationName: observationPoint.locationName,
     hourlyForecast: forecastBundle.hourly,
-    sourceAttribution: forecastBundle.sourceAttribution,
+    sourceAttribution: [...forecastBundle.sourceAttribution, ...effectiveSiteProfile.sourceAttribution],
     lightPollutionEstimate,
-    siteProfile: {
-      bortleClass: parsed.site_profile?.bortle_class,
-      elevationM: parsed.site_profile?.elevation_m,
-      nearWater: parsed.site_profile?.near_water,
-    },
+    siteProfile: effectiveSiteProfile.siteProfile,
     mode: effectiveMode,
     target: resolvedTarget,
   });
@@ -822,6 +700,7 @@ export async function getNightSkyOutlookReport(input) {
   validateForecastDate(parsed.date, parsed.timezone);
   const detailPolicy = getForecastDetailPolicy(parsed.date, parsed.timezone);
   const observationPoint = await resolveObservationPoint(parsed, input.kakaoRestApiKey);
+  const effectiveSiteProfile = await resolveEffectiveSiteProfile(parsed.site_profile, observationPoint);
   let lightPollutionEstimate = null;
 
   try {
@@ -856,13 +735,9 @@ export async function getNightSkyOutlookReport(input) {
     timezone: forecastBundle.timezone,
     locationName: observationPoint.locationName,
     hourlyForecast: forecastBundle.hourly,
-    sourceAttribution: forecastBundle.sourceAttribution,
+    sourceAttribution: [...forecastBundle.sourceAttribution, ...effectiveSiteProfile.sourceAttribution],
     lightPollutionEstimate,
-    siteProfile: {
-      bortleClass: parsed.site_profile?.bortle_class,
-      elevationM: parsed.site_profile?.elevation_m,
-      nearWater: parsed.site_profile?.near_water,
-    },
+    siteProfile: effectiveSiteProfile.siteProfile,
     mode: effectiveMode,
     target: resolvedTarget,
   });
@@ -889,7 +764,7 @@ export async function getNightSkyOutlookReport(input) {
       overall_outlook_score: detailedReport.scores.overall_score,
       mode_outlook_score: detailedReport.scores.mode_score,
       active_mode: detailedReport.scores.active_mode,
-      go_no_go_outlook: detailedReport.derived_recommendations.go_no_go,
+      mode_ready: detailedReport.derived_recommendations.mode_ready,
     },
     curve_summary: detailedReport.curve_summary,
     outlook_blocks: buildOutlookBlocks(hourlyOutlookConditions),

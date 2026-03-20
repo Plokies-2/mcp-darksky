@@ -15,6 +15,8 @@ test("install page focuses on apps onboarding and GitHub docs", () => {
   assert.ok(!html.includes("2026-03-19-continuous-bortle-v2-korea-calibrated"));
   assert.ok(!html.includes("https://darksky.example.com/prompt"));
   assert.ok(html.includes("필수 고려사항"));
+  assert.ok(html.includes("조건 요약"));
+  assert.ok(html.includes("광해등급"));
 });
 
 test("home page advertises install guide and the five shooting modes", () => {

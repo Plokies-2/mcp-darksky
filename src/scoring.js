@@ -2,25 +2,55 @@ import { getAstronomicalNightBounds, getAstronomyContext } from "./astronomy.js"
 
 const DEFAULT_SCORING_MODE = "wide_field_milky_way";
 
+const MODE_WEIGHT_PRESETS = {
+  general: { cloud: 0.3, transparency: 0.18, darkness: 0.28, dew: 0.08, stability: 0.16 },
+  wide_field_milky_way: { cloud: 0.3, transparency: 0.18, darkness: 0.32, dew: 0.05, stability: 0.15 },
+  wide_field_nightscape: { cloud: 0.34, transparency: 0.12, darkness: 0.16, dew: 0.08, stability: 0.3 },
+  broadband_deep_sky: { cloud: 0.22, transparency: 0.22, darkness: 0.34, dew: 0.05, stability: 0.17 },
+  narrowband_deep_sky: { cloud: 0.22, transparency: 0.12, darkness: 0.16, dew: 0.06, stability: 0.44 },
+  star_trail: { cloud: 0.38, transparency: 0.08, darkness: 0.12, dew: 0.12, stability: 0.3 },
+};
+
+const BORTLE_DARKNESS_BASE = {
+  1: 100,
+  2: 95,
+  3: 88,
+  4: 78,
+  5: 64,
+  6: 48,
+  7: 30,
+  8: 12,
+  9: 0,
+};
+
+const BORTLE_MODE_SCORE_CAPS = {
+  general: { 1: 97, 2: 94, 3: 89, 4: 82, 5: 68, 6: 50, 7: 28, 8: 10, 9: 0 },
+  wide_field_milky_way: { 1: 96, 2: 94, 3: 90, 4: 84, 5: 68, 6: 48, 7: 24, 8: 0, 9: 0 },
+  wide_field_nightscape: { 1: 96, 2: 95, 3: 92, 4: 88, 5: 80, 6: 70, 7: 58, 8: 42, 9: 24 },
+  broadband_deep_sky: { 1: 95, 2: 92, 3: 86, 4: 78, 5: 62, 6: 44, 7: 24, 8: 0, 9: 0 },
+  narrowband_deep_sky: { 1: 96, 2: 94, 3: 92, 4: 88, 5: 80, 6: 68, 7: 54, 8: 36, 9: 18 },
+  star_trail: { 1: 96, 2: 95, 3: 92, 4: 88, 5: 82, 6: 74, 7: 62, 8: 48, 9: 28 },
+};
+
 const SCORING_MODE_PRESETS = {
   wide_field_milky_way: {
-    weights: { cloud: 0.3, transparency: 0.22, darkness: 0.28, dew: 0.08, stability: 0.12 },
+    weights: MODE_WEIGHT_PRESETS.wide_field_milky_way,
     requiresAstronomicalNight: true,
   },
   wide_field_nightscape: {
-    weights: { cloud: 0.3, transparency: 0.18, darkness: 0.16, dew: 0.1, stability: 0.26 },
+    weights: MODE_WEIGHT_PRESETS.wide_field_nightscape,
     requiresAstronomicalNight: false,
   },
   broadband_deep_sky: {
-    weights: { cloud: 0.26, transparency: 0.24, darkness: 0.24, dew: 0.08, stability: 0.18 },
+    weights: MODE_WEIGHT_PRESETS.broadband_deep_sky,
     requiresAstronomicalNight: true,
   },
   narrowband_deep_sky: {
-    weights: { cloud: 0.24, transparency: 0.2, darkness: 0.14, dew: 0.08, stability: 0.34 },
+    weights: MODE_WEIGHT_PRESETS.narrowband_deep_sky,
     requiresAstronomicalNight: true,
   },
   star_trail: {
-    weights: { cloud: 0.34, transparency: 0.14, darkness: 0.16, dew: 0.14, stability: 0.22 },
+    weights: MODE_WEIGHT_PRESETS.star_trail,
     requiresAstronomicalNight: false,
   },
 };
@@ -28,63 +58,37 @@ const SCORING_MODE_PRESETS = {
 const MODE_PROFILES = {
   general: {
     label: "General",
-    weights: {
-      cloud: 0.28,
-      transparency: 0.2,
-      darkness: 0.24,
-      dew: 0.13,
-      stability: 0.15,
-    },
+    weights: MODE_WEIGHT_PRESETS.general,
   },
   wide_field_milky_way: {
     label: "Wide-field Milky Way",
-    weights: {
-      cloud: 0.3,
-      transparency: 0.22,
-      darkness: 0.28,
-      dew: 0.08,
-      stability: 0.12,
-    },
+    weights: MODE_WEIGHT_PRESETS.wide_field_milky_way,
   },
   wide_field_nightscape: {
     label: "Wide-field Nightscape",
-    weights: {
-      cloud: 0.3,
-      transparency: 0.18,
-      darkness: 0.16,
-      dew: 0.1,
-      stability: 0.26,
-    },
+    weights: MODE_WEIGHT_PRESETS.wide_field_nightscape,
   },
   broadband_deep_sky: {
     label: "Broadband Deep-sky",
-    weights: {
-      cloud: 0.26,
-      transparency: 0.24,
-      darkness: 0.24,
-      dew: 0.08,
-      stability: 0.18,
-    },
+    weights: MODE_WEIGHT_PRESETS.broadband_deep_sky,
   },
   narrowband_deep_sky: {
     label: "Narrowband Deep-sky",
-    weights: {
-      cloud: 0.24,
-      transparency: 0.2,
-      darkness: 0.14,
-      dew: 0.08,
-      stability: 0.34,
-    },
+    weights: MODE_WEIGHT_PRESETS.narrowband_deep_sky,
   },
   star_trail: {
     label: "Star Trail",
-    weights: {
-      cloud: 0.34,
-      transparency: 0.14,
-      darkness: 0.16,
-      dew: 0.14,
-      stability: 0.22,
-    },
+    weights: MODE_WEIGHT_PRESETS.star_trail,
+  },
+};
+
+const URBAN_REFERENCE_BORTLE_THRESHOLD = 7;
+
+const URBAN_REFERENCE_MODE_CONFIG = {
+  broadband_deep_sky: {
+    referenceMode: "narrowband_deep_sky",
+    label: "협대역/듀얼밴드 필터 기준 참고 점수",
+    targetCategories: ["deep_sky"],
   },
 };
 
@@ -127,6 +131,57 @@ function normalizeScoringMode(mode) {
 
 function asFiniteNumber(value) {
   return Number.isFinite(value) ? value : null;
+}
+
+function interpolateBortleValue(table, bortleClass) {
+  const clamped = clamp(Number(bortleClass ?? 4), 1, 9);
+  const lower = Math.floor(clamped);
+  const upper = Math.ceil(clamped);
+
+  if (lower === upper) {
+    return Number(table[lower] ?? table[4] ?? 0);
+  }
+
+  const lowerValue = Number(table[lower] ?? table[4] ?? 0);
+  const upperValue = Number(table[upper] ?? table[4] ?? 0);
+  const ratio = clamped - lower;
+  return lowerValue + (upperValue - lowerValue) * ratio;
+}
+
+function calculateAirmassFromAltitudeDegrees(altitudeDegrees) {
+  if (!Number.isFinite(altitudeDegrees) || altitudeDegrees <= 0) {
+    return null;
+  }
+
+  const altitude = clamp(altitudeDegrees, 0.1, 90);
+  const zenithDegrees = 90 - altitude;
+  const zenithRadians = (zenithDegrees * Math.PI) / 180;
+  return 1 / (Math.cos(zenithRadians) + 0.50572 * (96.07995 - zenithDegrees) ** -1.6364);
+}
+
+function calculateElevationTransparencyBonus(siteProfile) {
+  const elevation = asFiniteNumber(siteProfile?.elevationM) ?? 0;
+  if (elevation <= 300) {
+    return 0;
+  }
+  if (elevation <= 800) {
+    return ((elevation - 300) / 500) * 2;
+  }
+  if (elevation <= 1500) {
+    return 2 + ((elevation - 800) / 700) * 3;
+  }
+  return clamp(5 + ((elevation - 1500) / 1500) * 3, 0, 8);
+}
+
+function calculateElevationDewBonus(siteProfile) {
+  const elevation = asFiniteNumber(siteProfile?.elevationM) ?? 0;
+  if (elevation <= 300) {
+    return 0;
+  }
+  if (elevation <= 1000) {
+    return ((elevation - 300) / 700) * 3;
+  }
+  return clamp(3 + ((elevation - 1000) / 1500) * 3, 0, 6);
 }
 
 function getTargetAltitudeDegrees(hour) {
@@ -217,21 +272,23 @@ function computeBaseScore(weights, componentScores) {
 }
 
 function calculateCloudScore(hour) {
-  const weightedCloud =
-    (hour.cloud_cover_low ?? 0) * 0.5 +
-    (hour.cloud_cover_mid ?? 0) * 0.3 +
-    (hour.cloud_cover_high ?? 0) * 0.2;
-  return clamp(100 - weightedCloud, 0, 100);
+  const total = Number(hour.cloud_cover ?? 0);
+  const low = Number(hour.cloud_cover_low ?? total);
+  const mid = Number(hour.cloud_cover_mid ?? total);
+  const high = Number(hour.cloud_cover_high ?? total);
+  const effectiveObstruction = Math.max(total * 0.9, low * 0.82 + mid * 0.58 + high * 0.3);
+  return clamp(100 - effectiveObstruction, 0, 100);
 }
 
-function calculateTransparencyScore(hour) {
+function calculateTransparencyScore(hour, siteProfile) {
   const visibilityScore = clamp(((hour.visibility ?? 0) / 24000) * 100, 0, 100);
-  const pm25Penalty = clamp(((hour.pm2_5 ?? 0) / 80) * 40, 0, 40);
-  const pm10Penalty = clamp(((hour.pm10 ?? 0) / 150) * 20, 0, 20);
-  const aodPenalty = clamp(((hour.aerosol_optical_depth ?? 0) / 0.8) * 25, 0, 25);
-  const dustPenalty = clamp(((hour.dust ?? 0) / 100) * 15, 0, 15);
-  const aqiPenalty = clamp(((hour.european_aqi ?? hour.us_aqi ?? 0) / 100) * 18, 0, 18);
-  return clamp(visibilityScore - pm25Penalty - pm10Penalty - aodPenalty - dustPenalty - aqiPenalty, 0, 100);
+  const pm25Penalty = clamp(((hour.pm2_5 ?? 0) / 70) * 32, 0, 32);
+  const pm10Penalty = clamp(((hour.pm10 ?? 0) / 120) * 14, 0, 14);
+  const aodPenalty = clamp(((hour.aerosol_optical_depth ?? 0) / 0.55) * 34, 0, 34);
+  const dustPenalty = clamp(((hour.dust ?? 0) / 120) * 10, 0, 10);
+  const aqiPenalty = clamp(((hour.european_aqi ?? hour.us_aqi ?? 0) / 100) * 16, 0, 16);
+  const elevationBonus = calculateElevationTransparencyBonus(siteProfile);
+  return clamp(visibilityScore - pm25Penalty - pm10Penalty - aodPenalty - dustPenalty - aqiPenalty + elevationBonus, 0, 100);
 }
 
 function calculateDarknessScore(hour, siteProfile) {
@@ -240,23 +297,24 @@ function calculateDarknessScore(hour, siteProfile) {
   }
 
   const bortle = clamp(siteProfile.bortleClass ?? 4, 1, 9);
-  const baseDarkness = clamp(110 - bortle * 10, 10, 100);
-  const moonPenaltyBase = (hour.moonAltitudeDegrees > 0 ? hour.moonIlluminationFraction * 55 : 0);
+  const baseDarkness = interpolateBortleValue(BORTLE_DARKNESS_BASE, bortle);
+  const moonPenaltyBase = (hour.moonAltitudeDegrees > 0 ? hour.moonIlluminationFraction * 60 : 0);
   const moonAltitudeFactor = hour.moonAltitudeDegrees > 0 ? clamp(hour.moonAltitudeDegrees / 60, 0.25, 1) : 0;
-  const galacticBonus = hour.galacticCoreVisible ? 8 : 0;
 
-  return clamp(baseDarkness - moonPenaltyBase * moonAltitudeFactor + galacticBonus, 0, 100);
+  return clamp(baseDarkness - moonPenaltyBase * moonAltitudeFactor, 0, 100);
 }
 
-function calculateDewRiskScore(hour) {
+function calculateDewRiskScore(hour, siteProfile) {
   const spread = (hour.temperature_2m ?? 0) - (hour.dew_point_2m ?? 0);
   const humidity = hour.relative_humidity_2m ?? 0;
   const wind = hour.wind_speed_10m ?? 0;
+  const elevationBonus = calculateElevationDewBonus(siteProfile);
 
   let score = 100;
   score -= clamp((3 - spread) * 18, 0, 55);
   score -= clamp(((humidity - 75) / 25) * 30, 0, 30);
   score += clamp(((wind - 8) / 10) * 15, 0, 15);
+  score += elevationBonus;
   return clamp(score, 0, 100);
 }
 
@@ -361,9 +419,123 @@ function calculateTargetAltitudeModeScore(hour, target) {
     return null;
   }
 
+  const altitude = getTargetAltitudeDegrees(hour) ?? 0;
   const threshold = getTargetAltitudeThreshold(target);
-  const normalized = clamp(((getTargetAltitudeDegrees(hour) ?? 0) - threshold) / (65 - threshold), 0, 1);
-  return round(35 + normalized * 65);
+  if (altitude < threshold) {
+    return round(clamp((altitude / Math.max(threshold, 1)) * 35, 0, 35));
+  }
+
+  const airmass = getTargetAirmass(hour) ?? calculateAirmassFromAltitudeDegrees(altitude);
+  if (airmass === null) {
+    return null;
+  }
+  if (airmass <= 1.25) {
+    return 100;
+  }
+  if (airmass <= 1.5) {
+    return round(88 + ((1.5 - airmass) / 0.25) * 12);
+  }
+  if (airmass <= 2) {
+    return round(68 + ((2 - airmass) / 0.5) * 20);
+  }
+  if (airmass <= 3) {
+    return round(42 + ((3 - airmass) / 1) * 26);
+  }
+  return round(clamp(10 + ((4.5 - airmass) / 1.5) * 32, 0, 42));
+}
+
+function calculateMilkyWayEffectiveCloud(hour) {
+  const total = Number(hour.cloud_cover ?? 0);
+  const low = Number(hour.cloud_cover_low ?? hour.cloud_cover ?? 0);
+  const mid = Number(hour.cloud_cover_mid ?? hour.cloud_cover ?? 0);
+  const high = Number(hour.cloud_cover_high ?? hour.cloud_cover ?? 0);
+  const layerWeighted = low * 0.7 + mid * 0.45 + high * 0.25;
+  return clamp(Math.max(total, low, layerWeighted), 0, 100);
+}
+
+function calculateMilkyWayAltitudeScore(hour) {
+  const altitude = asFiniteNumber(hour.galacticCoreAltitudeDegrees);
+  if (altitude === null || altitude <= 0) {
+    return 0;
+  }
+  if (altitude < 8) {
+    return round(12 + (altitude / 8) * 18);
+  }
+  if (altitude < 15) {
+    return round(30 + ((altitude - 8) / 7) * 25);
+  }
+  if (altitude < 22) {
+    return round(55 + ((altitude - 15) / 7) * 20);
+  }
+  if (altitude < 30) {
+    return round(75 + ((altitude - 22) / 8) * 17);
+  }
+  return 100;
+}
+
+function calculateMilkyWayCloudScore(hour) {
+  return round(100 - calculateMilkyWayEffectiveCloud(hour));
+}
+
+function calculateMilkyWayModeScore({
+  hour,
+  transparencyScore,
+  darknessScore,
+  dewRiskScore,
+  stabilityScore,
+  moonTargetClearanceScore,
+}) {
+  const altitudeScore = calculateMilkyWayAltitudeScore(hour);
+  const cloudScore = calculateMilkyWayCloudScore(hour);
+  const supportScore = average([dewRiskScore, stabilityScore]);
+
+  return round(
+    altitudeScore * 0.4 +
+    cloudScore * 0.35 +
+    darknessScore * 0.12 +
+    transparencyScore * 0.08 +
+    moonTargetClearanceScore * 0.03 +
+    supportScore * 0.02,
+  );
+}
+
+function applyMilkyWayShootabilityCaps(hour, modeScore, transparencyScore, darknessScore, hardFailReasons, siteProfile) {
+  const effectiveCloud = calculateMilkyWayEffectiveCloud(hour);
+  const altitude = asFiniteNumber(hour.galacticCoreAltitudeDegrees) ?? -90;
+  let adjusted = modeScore;
+
+  if (!hour.astronomicalNight) adjusted = Math.min(adjusted, 20);
+  if (!hour.galacticCoreVisible) adjusted = Math.min(adjusted, 25);
+  if (altitude < 8) adjusted = Math.min(adjusted, 35);
+  else if (altitude < 15) adjusted = Math.min(adjusted, 54);
+  else if (altitude < 22) adjusted = Math.min(adjusted, 74);
+
+  if (effectiveCloud >= 70) adjusted = Math.min(adjusted, 30);
+  else if (effectiveCloud >= 50) adjusted = Math.min(adjusted, 59);
+  else if (effectiveCloud >= 35) adjusted = Math.min(adjusted, 69);
+
+  if (transparencyScore < 40) adjusted = Math.min(adjusted, 64);
+  if (darknessScore < 55) adjusted = Math.min(adjusted, 52);
+  if (darknessScore < 45) adjusted = Math.min(adjusted, 40);
+  if (darknessScore < 35) adjusted = Math.min(adjusted, 30);
+  if (hardFailReasons.length) adjusted = Math.min(adjusted, 15);
+
+  return round(clamp(adjusted, 0, 100));
+}
+
+function isMilkyWayReady(hour, transparencyScore, darknessScore, hardFailReasons) {
+  const effectiveCloud = calculateMilkyWayEffectiveCloud(hour);
+  const altitude = asFiniteNumber(hour.galacticCoreAltitudeDegrees) ?? -90;
+
+  return (
+    hardFailReasons.length === 0 &&
+    hour.astronomicalNight &&
+    hour.galacticCoreVisible &&
+    altitude >= 15 &&
+    effectiveCloud < 35 &&
+    darknessScore >= 55 &&
+    transparencyScore >= 40
+  );
 }
 
 function applyModeCaps(mode, hour, modeScore, targetAltitudeScore) {
@@ -393,12 +565,19 @@ function applyModeCaps(mode, hour, modeScore, targetAltitudeScore) {
   return adjusted;
 }
 
+function applyUrbanLightPollutionCaps(mode, modeScore, siteProfile) {
+  const bortle = clamp(siteProfile?.bortleClass ?? 4, 1, 9);
+  const capTable = BORTLE_MODE_SCORE_CAPS[mode] ?? BORTLE_MODE_SCORE_CAPS.general;
+  const cap = interpolateBortleValue(capTable, bortle);
+  return round(clamp(Math.min(modeScore, cap), 0, 100));
+}
+
 function scoreHour(hour, previousHour, siteProfile, mode = "general", target = null) {
   const hardFailReasons = detectHardFail(hour);
   const cloudScore = calculateCloudScore(hour);
-  const transparencyScore = calculateTransparencyScore(hour);
+  const transparencyScore = calculateTransparencyScore(hour, siteProfile);
   const darknessScore = calculateDarknessScore(hour, siteProfile);
-  const dewRiskScore = calculateDewRiskScore(hour);
+  const dewRiskScore = calculateDewRiskScore(hour, siteProfile);
   const stabilityScore = calculateStabilityScore(hour, previousHour);
   const componentScores = {
     cloud: cloudScore,
@@ -415,39 +594,48 @@ function scoreHour(hour, previousHour, siteProfile, mode = "general", target = n
   if (!hour.astronomicalNight) {
     overallScore = Math.min(overallScore, 20);
   }
+  overallScore = Math.min(
+    overallScore,
+    interpolateBortleValue(BORTLE_MODE_SCORE_CAPS.general, siteProfile?.bortleClass ?? 4),
+  );
 
-  const beginnerReady = overallScore >= 60 && hardFailReasons.length === 0;
-  const milkyWayReady =
-    overallScore >= 70 &&
-    darknessScore >= 65 &&
-    cloudScore >= 60 &&
-    transparencyScore >= 55 &&
-    hour.galacticCoreVisible;
-  const deepSkyReady =
-    overallScore >= 68 &&
-    darknessScore >= 60 &&
-    stabilityScore >= 55 &&
-    (getTargetAltitudeDegrees(hour) === null || getTargetAltitudeDegrees(hour) >= 30) &&
-    hardFailReasons.length === 0;
   const modeProfile = getModeProfile(mode);
   const targetAltitudeScore = calculateTargetAltitudeModeScore(hour, target);
   const moonTargetClearanceScore = calculateMoonTargetClearanceScore(hour, mode);
-  let modeScore = computeBaseScore(modeProfile.weights, componentScores);
+  const milkyWayReady = isMilkyWayReady(hour, transparencyScore, darknessScore, hardFailReasons);
+  const milkyWayEffectiveCloud = calculateMilkyWayEffectiveCloud(hour);
+  const milkyWayCloudScore = calculateMilkyWayCloudScore(hour);
+  const milkyWayAltitudeScore = calculateMilkyWayAltitudeScore(hour);
+  let modeScore =
+    mode === "wide_field_milky_way"
+      ? calculateMilkyWayModeScore({
+          hour,
+          transparencyScore,
+          darknessScore,
+          dewRiskScore,
+          stabilityScore,
+          moonTargetClearanceScore,
+        })
+      : computeBaseScore(modeProfile.weights, componentScores);
 
-  if (mode !== "wide_field_nightscape" && mode !== "star_trail") {
+  if (mode !== "wide_field_milky_way" && mode !== "wide_field_nightscape" && mode !== "star_trail") {
     const moonPenaltyBlend = mode === "narrowband_deep_sky" ? 0.1 : 0.15;
     modeScore = modeScore * (1 - moonPenaltyBlend) + moonTargetClearanceScore * moonPenaltyBlend;
   }
   if ((mode === "broadband_deep_sky" || mode === "narrowband_deep_sky") && targetAltitudeScore !== null) {
     modeScore *= 0.7 + 0.3 * (targetAltitudeScore / 100);
   }
-  modeScore = applyModeCaps(mode, {
-    ...hour,
-    cloud_score: cloudScore,
-    darkness_score: darknessScore,
-    stability_score: stabilityScore,
-  }, modeScore, targetAltitudeScore);
-  if (hardFailReasons.length) {
+  modeScore =
+    mode === "wide_field_milky_way"
+      ? applyMilkyWayShootabilityCaps(hour, modeScore, transparencyScore, darknessScore, hardFailReasons, siteProfile)
+      : applyModeCaps(mode, {
+          ...hour,
+          cloud_score: cloudScore,
+          darkness_score: darknessScore,
+          stability_score: stabilityScore,
+        }, modeScore, targetAltitudeScore);
+  modeScore = applyUrbanLightPollutionCaps(mode, modeScore, siteProfile);
+  if (mode !== "wide_field_milky_way" && hardFailReasons.length) {
     modeScore = Math.min(modeScore, 15);
   }
 
@@ -459,7 +647,10 @@ function scoreHour(hour, previousHour, siteProfile, mode = "general", target = n
     narrowband_deep_sky: 62,
     star_trail: 58,
   };
-  const modeReady = clamp(modeScore, 0, 100) >= (modeReadyThresholds[mode] ?? 60) && hardFailReasons.length === 0;
+  const modeReady =
+    mode === "wide_field_milky_way"
+      ? milkyWayReady
+      : clamp(modeScore, 0, 100) >= (modeReadyThresholds[mode] ?? 60) && hardFailReasons.length === 0;
 
   return {
     ...hour,
@@ -474,10 +665,11 @@ function scoreHour(hour, previousHour, siteProfile, mode = "general", target = n
     mode_name: modeProfile.label,
     moon_target_clearance_score: round(moonTargetClearanceScore),
     target_altitude_score: targetAltitudeScore,
+    milky_way_altitude_score: milkyWayAltitudeScore,
+    milky_way_cloud_score: milkyWayCloudScore,
+    milky_way_effective_cloud: round(milkyWayEffectiveCloud),
     hard_fail_reasons: hardFailReasons,
-    beginner_ready: beginnerReady,
     milky_way_ready: milkyWayReady,
-    deep_sky_ready: deepSkyReady,
     explanation_hints: buildExplanationHints({
       ...hour,
       cloud_score: cloudScore,
@@ -544,7 +736,7 @@ function getGalacticCoreBandPriority(hour) {
 
 function buildMilkyWayCoreBestWindow(hours) {
   const viable = hours.filter(
-    (hour) => hour.astronomicalNight && hour.galacticCoreWindowCanUse && hour.hard_fail_reasons.length === 0,
+    (hour) => hour.milky_way_ready && hour.hard_fail_reasons.length === 0,
   );
   if (!viable.length) {
     return null;
@@ -582,7 +774,7 @@ function buildMilkyWayCoreBestWindow(hours) {
     if (!slice.length || !slice.some((hour) => hour.time === peakHour.time)) {
       continue;
     }
-    if (slice.some((hour) => !(hour.astronomicalNight && hour.galacticCoreWindowCanUse && hour.hard_fail_reasons.length === 0))) {
+    if (slice.some((hour) => !(hour.milky_way_ready && hour.hard_fail_reasons.length === 0))) {
       continue;
     }
 
@@ -635,6 +827,70 @@ function buildMilkyWayCoreBestWindow(hours) {
     average_score: round((peakHour.galacticCoreWindowScore ?? 0) * 100),
     hour_count: 1,
   };
+}
+
+export function buildPeakScoreWindows(
+  hours,
+  { scoreField, requireNight = true, predicate = null, scoreMapper = null } = {},
+) {
+  const candidates = hours
+    .map((hour, index) => {
+      const value = scoreMapper ? scoreMapper(hour) : hour?.[scoreField];
+      const score = Number(value);
+      return {
+        hour,
+        index,
+        score: Number.isFinite(score) ? round(score) : null,
+      };
+    })
+    .filter(
+      ({ hour, score }) =>
+        score !== null
+        && (!requireNight || hour?.astronomicalNight)
+        && (!predicate || predicate(hour))
+        && Array.isArray(hour?.hard_fail_reasons)
+        && hour.hard_fail_reasons.length === 0,
+    );
+
+  if (!candidates.length) {
+    return [];
+  }
+
+  const peakScore = Math.max(...candidates.map(({ score }) => score));
+  const peakHours = candidates.filter(({ score }) => score === peakScore);
+  if (!peakHours.length) {
+    return [];
+  }
+
+  const windows = [];
+  let current = [peakHours[0]];
+
+  const finalizeWindow = () => {
+    if (!current.length) {
+      return;
+    }
+    windows.push({
+      start: current[0].hour.time,
+      end: current[current.length - 1].hour.time,
+      average_score: peakScore,
+      hour_count: current.length,
+    });
+    current = [];
+  };
+
+  for (let index = 1; index < peakHours.length; index += 1) {
+    const previous = peakHours[index - 1];
+    const next = peakHours[index];
+    if (next.index === previous.index + 1) {
+      current.push(next);
+      continue;
+    }
+    finalizeWindow();
+    current = [next];
+  }
+  finalizeWindow();
+
+  return windows;
 }
 
 function buildWindowByScore(hours, { scoreField, minimumScore, requireNight = true, predicate = null, scoreMapper = null }) {
@@ -711,7 +967,7 @@ function buildTopWindows(hours, { scoreField, minimumScore, requireNight = true,
   return windows.sort((a, b) => b.average_score - a.average_score).slice(0, limit);
 }
 
-function determineHourBlockers(hour, siteProfile) {
+function determineHourBlockers(hour, siteProfile, mode = "general") {
   if (hour.hard_fail_reasons.length) {
     return hour.hard_fail_reasons.map((reason) => ({
       key: reason,
@@ -719,8 +975,12 @@ function determineHourBlockers(hour, siteProfile) {
     }));
   }
 
+  const cloudSeverity =
+    mode === "wide_field_milky_way"
+      ? clamp(Number(hour.milky_way_effective_cloud ?? 0), 0, 100)
+      : Math.max(0, 100 - (hour.cloud_score ?? 0));
   const blockers = [
-    { key: "cloud", severity: Math.max(0, 100 - (hour.cloud_score ?? 0)) },
+    { key: "cloud", severity: cloudSeverity },
     { key: "moonlight", severity: hour.moonVisible ? Math.max(0, 100 - (hour.darkness_score ?? 0)) : 0 },
     { key: "light_pollution", severity: siteProfile.bortleClass ? clamp((siteProfile.bortleClass - 1) * 12, 0, 100) : 0 },
     { key: "transparency", severity: Math.max(0, 100 - (hour.transparency_score ?? 0)) },
@@ -731,7 +991,10 @@ function determineHourBlockers(hour, siteProfile) {
   if (getTargetAltitudeDegrees(hour) !== null) {
     blockers.push({
       key: "target_altitude",
-      severity: getTargetVisible(hour) ? Math.max(0, 60 - (getTargetAltitudeDegrees(hour) ?? 0)) : 100,
+      severity:
+        mode === "wide_field_milky_way"
+          ? Math.max(0, 100 - Number(hour.milky_way_altitude_score ?? 0))
+          : getTargetVisible(hour) ? Math.max(0, 60 - (getTargetAltitudeDegrees(hour) ?? 0)) : 100,
     });
   }
 
@@ -766,9 +1029,9 @@ function blockerToReasonText(blocker) {
   }
 }
 
-function buildBlockerTimeline(hours, siteProfile) {
+function buildBlockerTimeline(hours, siteProfile, mode = "general") {
   return hours.map((hour) => {
-    const ranked = determineHourBlockers(hour, siteProfile);
+    const ranked = determineHourBlockers(hour, siteProfile, mode);
     const primary = ranked[0] ?? null;
     const secondary = ranked[1] ?? null;
     return {
@@ -785,15 +1048,45 @@ function buildScoreCurve(hours) {
     time: hour.time,
     overall_score: hour.overall_score,
     mode_score: hour.mode_score,
+    reference_mode_score: hour.reference_mode_score ?? null,
     cloud_score: hour.cloud_score,
     transparency_score: hour.transparency_score,
     darkness_score: hour.darkness_score,
     dew_risk_score: hour.dew_risk_score,
     stability_score: hour.stability_score,
-    milky_way_ready: hour.milky_way_ready,
-    deep_sky_ready: hour.deep_sky_ready,
     mode_ready: hour.mode_ready,
   }));
+}
+
+function buildUrbanReferenceContext(hours, siteProfile, mode, target) {
+  const config = URBAN_REFERENCE_MODE_CONFIG[mode];
+  const bortle = clamp(siteProfile?.bortleClass ?? 4, 1, 9);
+  if (!config || bortle < URBAN_REFERENCE_BORTLE_THRESHOLD) {
+    return null;
+  }
+
+  if (Array.isArray(config.targetCategories) && !config.targetCategories.includes(target?.category ?? "custom")) {
+    return null;
+  }
+
+  const referenceHours = hours.map((hour, index) =>
+    scoreHour(hour, hours[index - 1], siteProfile, config.referenceMode, target));
+  const referenceModeProfile = getModeProfile(config.referenceMode);
+
+  return {
+    label: config.label,
+    threshold_bortle_class: URBAN_REFERENCE_BORTLE_THRESHOLD,
+    reason: "urban_light_pollution_mitigation",
+    mode: config.referenceMode,
+    mode_label: referenceModeProfile.label,
+    mode_score: round(average(referenceHours.map((hour) => hour.mode_score))),
+    mode_ready: referenceHours.some((hour) => hour.mode_ready),
+    hourly_scores: referenceHours.map((hour) => ({
+      time: hour.time,
+      mode_score: hour.mode_score,
+      mode_ready: hour.mode_ready,
+    })),
+  };
 }
 
 function getTargetAltitudeThreshold(target) {
@@ -847,7 +1140,7 @@ function buildTargetBestWindow(hours, target) {
   return best;
 }
 
-function buildSummaryFlags(hours, siteProfile) {
+function buildSummaryFlags(hours, siteProfile, mode = "general") {
   const flags = new Set();
   if (hours.some((hour) => hour.dew_risk_score < 40)) {
     flags.add("렌즈 결로 주의");
@@ -867,7 +1160,7 @@ function buildSummaryFlags(hours, siteProfile) {
   if (siteProfile.bortleClass && siteProfile.bortleClass >= 6) {
     flags.add("기본 광공해가 강한 장소");
   }
-  if (!hours.some((hour) => hour.milky_way_ready)) {
+  if (mode === "wide_field_milky_way" && !hours.some((hour) => hour.milky_way_ready)) {
     flags.add("은하수 촬영 부적합");
   }
   return Array.from(flags);
@@ -1083,31 +1376,46 @@ export function generateNightSkyReport({
     minimumScore: 55,
     requireNight: normalizedMode !== "wide_field_nightscape" && normalizedMode !== "star_trail",
   });
+  const peakModeWindows = buildPeakScoreWindows(scoredHours, {
+    scoreField: "mode_score",
+    requireNight: normalizedMode !== "wide_field_nightscape" && normalizedMode !== "star_trail",
+    predicate: normalizedMode === "wide_field_milky_way" ? (hour) => hour.milky_way_ready : null,
+  });
   const overallScore = round(average(scoredHours.map((hour) => hour.overall_score)));
   const cloudScore = round(average(scoredHours.map((hour) => hour.cloud_score)));
   const transparencyScore = round(average(scoredHours.map((hour) => hour.transparency_score)));
   const darknessScore = round(average(scoredHours.map((hour) => hour.darkness_score)));
   const dewRiskScore = round(average(scoredHours.map((hour) => hour.dew_risk_score)));
   const stabilityScore = round(average(scoredHours.map((hour) => hour.stability_score)));
-  const summaryFlags = buildSummaryFlags(scoredHours, effectiveSiteProfile);
-  const goNoGo = overallScore >= 60 && scoredHours.some((hour) => hour.overall_score >= 65);
+  const summaryFlags = buildSummaryFlags(scoredHours, effectiveSiteProfile, normalizedMode);
   const targetSummary = buildTargetSummary(scoredHours, target);
   const galacticCoreSummary = buildGalacticCoreSummary(scoredHours);
+  const urbanReferenceContext = buildUrbanReferenceContext(hours, effectiveSiteProfile, normalizedMode, target);
+  const referenceScoreByTime = new Map(
+    (urbanReferenceContext?.hourly_scores ?? []).map((hour) => [hour.time, hour.mode_score]),
+  );
+  const bestWindows = peakModeWindows.length ? peakModeWindows : null;
+  const modeBestWindows = peakModeWindows.length ? peakModeWindows : null;
   const bestWindow =
     normalizedMode === "wide_field_milky_way"
-      ? galacticCoreSummary.best_window ?? genericBestWindow
-      : genericBestWindow;
+      ? bestWindows?.[0] ?? null
+      : bestWindows?.[0] ?? genericBestWindow;
   const modeBestWindow =
     normalizedMode === "wide_field_milky_way"
-      ? galacticCoreSummary.best_window ?? genericModeBestWindow
-      : genericModeBestWindow;
+      ? modeBestWindows?.[0] ?? null
+      : modeBestWindows?.[0] ?? genericModeBestWindow;
   const modeProfile = getModeProfile(normalizedMode);
   const modeScore = round(average(scoredHours.map((hour) => hour.mode_score)));
   const modeReady = scoredHours.some((hour) => hour.mode_ready);
-  const blockerTimeline = buildBlockerTimeline(scoredHours, effectiveSiteProfile);
+  const blockerTimeline = buildBlockerTimeline(scoredHours, effectiveSiteProfile, normalizedMode);
   const windowRankings = buildWindowRankings(scoredHours, normalizedMode, target);
   const curveSummary = buildCurveSummary(scoredHours, blockerTimeline);
-  const scoreCurve = buildScoreCurve(scoredHours);
+  const scoreCurve = buildScoreCurve(
+    scoredHours.map((hour) => ({
+      ...hour,
+      reference_mode_score: referenceScoreByTime.get(hour.time) ?? null,
+    })),
+  );
 
   return {
     location: {
@@ -1139,6 +1447,7 @@ export function generateNightSkyReport({
       time: hour.time,
       overall_score: hour.overall_score,
       mode_score: hour.mode_score,
+      reference_mode_score: referenceScoreByTime.get(hour.time) ?? null,
       mode_ready: hour.mode_ready,
       moon_context: {
         visible: hour.moonVisible,
@@ -1154,9 +1463,6 @@ export function generateNightSkyReport({
       darkness_score: hour.darkness_score,
       dew_risk_score: hour.dew_risk_score,
       stability_score: hour.stability_score,
-      beginner_ready: hour.beginner_ready,
-      milky_way_ready: hour.milky_way_ready,
-      deep_sky_ready: hour.deep_sky_ready,
       target_context: target
         ? {
             name: target.name,
@@ -1202,6 +1508,9 @@ export function generateNightSkyReport({
         galactic_core_moon_separation_degrees:
           asFiniteNumber(hour.galacticCoreMoonSeparationDegrees) !== null ? round(hour.galacticCoreMoonSeparationDegrees) : null,
         galactic_core_window_band: hour.galacticCoreWindow?.band ?? null,
+        milky_way_effective_cloud: hour.milky_way_effective_cloud ?? null,
+        milky_way_cloud_score: hour.milky_way_cloud_score ?? null,
+        milky_way_altitude_score: hour.milky_way_altitude_score ?? null,
         target_altitude_degrees: getTargetAltitudeDegrees(hour) !== null ? round(getTargetAltitudeDegrees(hour)) : null,
         target_airmass: getTargetAirmass(hour) !== null ? round(getTargetAirmass(hour), 2) : null,
         target_moon_separation_degrees:
@@ -1211,6 +1520,16 @@ export function generateNightSkyReport({
     scores: {
       overall_score: overallScore,
       mode_score: modeScore,
+      reference_mode_score: urbanReferenceContext?.mode_score ?? null,
+      reference_mode_score_context: urbanReferenceContext
+        ? {
+            label: urbanReferenceContext.label,
+            mode: urbanReferenceContext.mode,
+            mode_label: urbanReferenceContext.mode_label,
+            mode_ready: urbanReferenceContext.mode_ready,
+            threshold_bortle_class: urbanReferenceContext.threshold_bortle_class,
+          }
+        : null,
       active_mode: normalizedMode,
       mode_label: modeProfile.label,
       cloud_score: cloudScore,
@@ -1226,17 +1545,13 @@ export function generateNightSkyReport({
     curve_summary: curveSummary,
     derived_recommendations: {
       best_window: bestWindow,
+      best_windows: bestWindows,
       mode_best_window: modeBestWindow,
-      go_no_go: goNoGo ? "go" : "no_go",
+      mode_best_windows: modeBestWindows,
       mode_ready: modeReady,
-      dew_heater_needed: scoredHours.some((hour) => hour.dew_risk_score < 45),
-      milky_way_ready: scoredHours.some((hour) => hour.milky_way_ready),
-      deep_sky_ready: scoredHours.some((hour) => hour.deep_sky_ready),
-      beginner_safe: goNoGo && scoredHours.some((hour) => hour.beginner_ready),
     },
     risk_flags: summaryFlags,
     astronomy_context: {
-      milky_way_peak_visible: scoredHours.some((hour) => hour.galacticCoreVisible),
       moon_interference_hours: scoredHours.filter((hour) => hour.moonVisible).length,
       astronomical_night_hours: scoredHours.filter((hour) => hour.astronomicalNight).length,
       galactic_core: galacticCoreSummary,
