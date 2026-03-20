@@ -3,18 +3,10 @@
   "version": "0.1.0",
   "description": "Night sky scoring MCP for astrophotography conditions in Korea.",
   "type": "module",
-  "main": "src/index.js",
+  "main": "src/http.js",
   "scripts": {
-    "start": "node src/index.js",
-    "start:stdio": "node src/stdio.js",
-    "start:http": "node src/http.js",
+    "start": "node src/http.js",
     "start:railway": "node scripts/boot-railway.mjs",
-    "dev:worker": "wrangler dev",
-    "deploy:worker": "wrangler deploy",
-    "build:light-pollution-stats": "python scripts/black_marble_bortle.py build-stats --data-dir data --output data/black-marble-korea-stats.json",
-    "build:light-pollution-distribution": "python scripts/black_marble_bortle.py build-distribution --data-dir data --stats data/black-marble-korea-stats.json --output data/black-marble-korea-distribution.json",
-    "build:light-pollution-runtime-artifact": "python scripts/black_marble_bortle.py build-runtime-artifact --data-dir data --output data/black-marble-korea-runtime.npz",
-    "sample:light-pollution": "python scripts/black_marble_bortle.py sample --data-dir data --stats data/black-marble-korea-stats.json --runtime-artifact data/black-marble-korea-runtime.npz --lat 37.5665 --lon 126.9780",
     "test": "node --test"
   },
   "keywords": [
@@ -27,11 +19,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
     "dotenv": "^17.2.3",
-    "hono": "^4.11.4",
     "suncalc": "^1.9.0",
     "zod": "^3.24.1"
-  },
-  "devDependencies": {
-    "wrangler": "^4.9.0"
   }
 }

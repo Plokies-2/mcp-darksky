@@ -528,6 +528,115 @@ function buildBestWindow(hours, mode = "general") {
   return best;
 }
 
+function getGalacticCoreBandPriority(hour) {
+  const band = hour?.galacticCoreWindow?.band ?? null;
+  if (band === "excellent") {
+    return 3;
+  }
+  if (band === "good") {
+    return 2;
+  }
+  if (band === "low") {
+    return 1;
+  }
+  return 0;
+}
+
+function buildMilkyWayCoreBestWindow(hours) {
+  const viable = hours.filter(
+    (hour) => hour.astronomicalNight && hour.galacticCoreWindowCanUse && hour.hard_fail_reasons.length === 0,
+  );
+  if (!viable.length) {
+    return null;
+  }
+
+  const peakHour = viable.reduce((best, hour) => {
+    const bestAltitude = best?.galacticCoreAltitudeDegrees ?? -90;
+    const nextAltitude = hour?.galacticCoreAltitudeDegrees ?? -90;
+    if (nextAltitude !== bestAltitude) {
+      return nextAltitude > bestAltitude ? hour : best;
+    }
+
+    const bestScore = best?.galacticCoreWindowScore ?? -1;
+    const nextScore = hour?.galacticCoreWindowScore ?? -1;
+    return nextScore > bestScore ? hour : best;
+  }, null);
+
+  if (!peakHour) {
+    return null;
+  }
+
+  const peakIndex = hours.findIndex((hour) => hour.time === peakHour.time);
+  if (peakIndex < 0) {
+    return null;
+  }
+
+  const candidates = [];
+  const singleHourFallbacks = [];
+  for (const startIndex of [peakIndex - 1, peakIndex]) {
+    if (startIndex < 0 || startIndex >= hours.length) {
+      continue;
+    }
+
+    const slice = hours.slice(startIndex, Math.min(startIndex + 2, hours.length));
+    if (!slice.length || !slice.some((hour) => hour.time === peakHour.time)) {
+      continue;
+    }
+    if (slice.some((hour) => !(hour.astronomicalNight && hour.galacticCoreWindowCanUse && hour.hard_fail_reasons.length === 0))) {
+      continue;
+    }
+
+    const averageScore = average(slice.map((hour) => (hour.galacticCoreWindowScore ?? 0) * 100));
+    const averageAltitude = average(slice.map((hour) => hour.galacticCoreAltitudeDegrees ?? 0));
+    const averageBand = average(slice.map((hour) => getGalacticCoreBandPriority(hour)));
+
+    const candidate = {
+      start: slice[0].time,
+      end: slice[slice.length - 1].time,
+      average_score: round(averageScore),
+      hour_count: slice.length,
+      composite_rank: averageScore + averageAltitude + averageBand * 5,
+    };
+
+    if (slice.length >= 2) {
+      candidates.push(candidate);
+    } else {
+      singleHourFallbacks.push(candidate);
+    }
+  }
+
+  if (candidates.length) {
+    const best = candidates.reduce((winner, candidate) =>
+      candidate.composite_rank > winner.composite_rank ? candidate : winner,
+    );
+    return {
+      start: best.start,
+      end: best.end,
+      average_score: best.average_score,
+      hour_count: best.hour_count,
+    };
+  }
+
+  if (singleHourFallbacks.length) {
+    const best = singleHourFallbacks.reduce((winner, candidate) =>
+      candidate.composite_rank > winner.composite_rank ? candidate : winner,
+    );
+    return {
+      start: best.start,
+      end: best.end,
+      average_score: best.average_score,
+      hour_count: best.hour_count,
+    };
+  }
+
+  return {
+    start: peakHour.time,
+    end: peakHour.time,
+    average_score: round((peakHour.galacticCoreWindowScore ?? 0) * 100),
+    hour_count: 1,
+  };
+}
+
 function buildWindowByScore(hours, { scoreField, minimumScore, requireNight = true, predicate = null, scoreMapper = null }) {
   const viable = hours.filter((hour) => (!requireNight || hour.astronomicalNight) && (!predicate || predicate(hour)));
   if (!viable.length) {
@@ -819,13 +928,7 @@ function buildGalacticCoreSummary(hours) {
     ? moonSensitiveHours.reduce((best, hour) =>
       (hour.galacticCoreMoonSeparationDegrees ?? 999) < (best.galacticCoreMoonSeparationDegrees ?? 999) ? hour : best)
     : null;
-  const bestWindow = buildWindowByScore(hours, {
-    scoreField: "galacticCoreWindowScore",
-    minimumScore: 0.33,
-    requireNight: true,
-    predicate: (hour) => hour.galacticCoreWindowCanUse,
-    scoreMapper: (hour) => (hour.galacticCoreWindowScore ?? 0) * 100,
-  });
+  const bestWindow = buildMilkyWayCoreBestWindow(hours);
 
   return {
     visible_hours: visibleHours.length,
@@ -974,8 +1077,8 @@ export function generateNightSkyReport({
 
   const scoredHours = hours.map((hour, index) =>
     scoreHour(hour, hours[index - 1], effectiveSiteProfile, normalizedMode, target));
-  const bestWindow = buildBestWindow(scoredHours, normalizedMode);
-  const modeBestWindow = buildWindowByScore(scoredHours, {
+  const genericBestWindow = buildBestWindow(scoredHours, normalizedMode);
+  const genericModeBestWindow = buildWindowByScore(scoredHours, {
     scoreField: "mode_score",
     minimumScore: 55,
     requireNight: normalizedMode !== "wide_field_nightscape" && normalizedMode !== "star_trail",
@@ -990,6 +1093,14 @@ export function generateNightSkyReport({
   const goNoGo = overallScore >= 60 && scoredHours.some((hour) => hour.overall_score >= 65);
   const targetSummary = buildTargetSummary(scoredHours, target);
   const galacticCoreSummary = buildGalacticCoreSummary(scoredHours);
+  const bestWindow =
+    normalizedMode === "wide_field_milky_way"
+      ? galacticCoreSummary.best_window ?? genericBestWindow
+      : genericBestWindow;
+  const modeBestWindow =
+    normalizedMode === "wide_field_milky_way"
+      ? galacticCoreSummary.best_window ?? genericModeBestWindow
+      : genericModeBestWindow;
   const modeProfile = getModeProfile(normalizedMode);
   const modeScore = round(average(scoredHours.map((hour) => hour.mode_score)));
   const modeReady = scoredHours.some((hour) => hour.mode_ready);
@@ -1062,6 +1173,7 @@ export function generateNightSkyReport({
       explanation_hints: hour.explanation_hints,
       raw_inputs: {
         temperature_2m: hour.temperature_2m,
+        apparent_temperature: hour.apparent_temperature,
         dew_point_2m: hour.dew_point_2m,
         relative_humidity_2m: hour.relative_humidity_2m,
         cloud_cover: hour.cloud_cover,

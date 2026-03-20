@@ -6,7 +6,6 @@ This guide covers:
 - `describe_light_pollution_method` MCP tool
 - `GET /api/light-pollution`
 - `GET /api/light-pollution/method`
-- Any preprocessing job that turns annual Korea-only Black Marble inputs into runtime artifacts
 
 ## Evidence sources
 - Primary annual radiance source: NASA Black Marble `VNP46A4` and `VJ146A4`
@@ -21,13 +20,12 @@ This guide covers:
 
 For every release, capture:
 - source product year and version
-- preprocessing script version or commit hash
 - output artifact checksum
 - statistics file checksum
-- generation timestamp
+- artifact provenance or storage record
 
 ## Execution process
-1. Preprocess annual tiles into a Korea-ready artifact or stats bundle.
+1. Load the prepared Korea-ready runtime artifact and supporting stats bundle.
 2. Validate bounds, pixel counts, nodata handling, and threshold generation.
 3. Sample runtime coordinates from the prepared artifact.
 4. Derive:
@@ -63,7 +61,7 @@ For every release, capture:
 
 ## Release gates
 1. `npm test`
-2. `npm run build:light-pollution-stats`
+2. Confirm the runtime artifact and stats files are the intended release inputs
 3. Manual smoke on at least:
    - one bright urban site
    - one dark rural or mountain site

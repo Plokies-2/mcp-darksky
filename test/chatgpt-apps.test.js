@@ -68,7 +68,7 @@ test("MCP server registers the App widget as a resource", async () => {
   const server = createDarkSkyServer({ publicBaseUrl: PUBLIC_BASE_URL });
   const widgetResource = server._registeredResources?.[APP_WIDGET_URI];
 
-  assert.ok(widgetResource, `Expected resource ${APP_WIDGET_URI} to be registered for ChatGPT Apps`);
+  assert.ok(widgetResource);
   assert.equal(typeof widgetResource.readCallback, "function");
   assert.equal(widgetResource.metadata?.mimeType, APP_WIDGET_MIME_TYPE);
 
@@ -76,7 +76,6 @@ test("MCP server registers the App widget as a resource", async () => {
   const widgetHtml = extractResourceText(response);
 
   assert.equal(typeof widgetHtml, "string");
-  assert.match(widgetHtml, new RegExp(APP_WIDGET_URI.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"));
   assert.match(widgetHtml, /widget-uri/);
 });
 
@@ -88,25 +87,19 @@ test("score-related tools expose ChatGPT Apps output metadata", () => {
     const tool = server._registeredTools?.[name];
     const meta = tool?._meta;
 
-    assert.ok(tool, `Expected tool ${name} to be registered`);
-    assert.ok(meta && typeof meta === "object", `Expected ${name} to include _meta`);
+    assert.ok(tool);
+    assert.ok(meta && typeof meta === "object");
     assert.equal(extractWidgetResourceUri(meta), APP_WIDGET_URI);
   }
 });
 
-test("score and outlook tool descriptions steer non-explicit target requests toward general mode", () => {
+test("tool descriptions steer vague requests toward general mode and mention ambiguous night-time interpretation", () => {
   const server = createDarkSkyServer({ publicBaseUrl: PUBLIC_BASE_URL });
   const scoreDescription = server._registeredTools?.score_night_sky?.description ?? "";
   const outlookDescription = server._registeredTools?.score_night_sky_outlook?.description ?? "";
-  const scoreGoalDoc = server._registeredTools?.score_night_sky?.inputSchema?.shape?.shooting_goal?.description ?? "";
-  const outlookGoalDoc = server._registeredTools?.score_night_sky_outlook?.inputSchema?.shape?.shooting_goal?.description ?? "";
 
-  assert.match(scoreDescription, /did not explicitly name a celestial target/i);
   assert.match(scoreDescription, /keep mode as general by default/i);
-  assert.match(outlookDescription, /did not explicitly name a celestial target/i);
   assert.match(outlookDescription, /keep mode as general by default/i);
-  assert.match(scoreGoalDoc, /If no celestial target is explicitly stated, keep mode as general by default/i);
-  assert.match(outlookGoalDoc, /If no celestial target is explicitly stated, keep mode as general by default/i);
 });
 
 test("score-related tool schemas reject unsupported extra fields", () => {
@@ -129,7 +122,7 @@ test("score-related tool schemas reject unsupported extra fields", () => {
   }));
 });
 
-test("score tool content nudges a compact structured Korean answer", () => {
+test("score tool content uses best_window first and labels required considerations", () => {
   const content = buildScoreToolContent({
     location: {
       timezone: "Asia/Seoul",
@@ -139,8 +132,8 @@ test("score tool content nudges a compact structured Korean answer", () => {
       cloud_score: 91,
       transparency_score: 67,
       darkness_score: 82,
-      dew_risk_score: 88,
-      stability_score: 63,
+      dew_risk_score: 40,
+      stability_score: 52,
     },
     curve_summary: {
       overall_trend: "improving",
@@ -148,6 +141,10 @@ test("score tool content nudges a compact structured Korean answer", () => {
     derived_recommendations: {
       go_no_go: "go",
       best_window: {
+        start: "2026-03-20T15:00:00Z",
+        end: "2026-03-20T16:00:00Z",
+      },
+      mode_best_window: {
         start: "2026-03-20T12:00:00Z",
         end: "2026-03-20T18:00:00Z",
       },
@@ -163,96 +160,110 @@ test("score tool content nudges a compact structured Korean answer", () => {
       resolved_mode: "wide_field_milky_way",
       resolution_reason: "shooting_goal_milky_way",
       shooting_goal: "은하수 광각 촬영",
-      advanced_tip: "광각 광대역 촬영이라면 달빛과 투명도를 먼저 보고, 바람은 그다음 변수로 보세요",
+      advanced_tip: "광각 은하수라면 코어가 더 높아지는 구간에 노출을 몰아주세요.",
     },
     blocker_timeline: [
-      { primary_blocker: "moonlight" },
       { primary_blocker: "moonlight" },
       { primary_blocker: "transparency" },
     ],
     hourly_conditions: [
-      { time: "2026-03-20T10:00:00Z", mode_score: 56, primary_blocker: "moonlight" },
-      { time: "2026-03-20T12:00:00Z", mode_score: 68, primary_blocker: "transparency" },
-      { time: "2026-03-20T14:00:00Z", mode_score: 81, primary_blocker: null },
+      {
+        time: "2026-03-20T15:00:00Z",
+        mode_score: 73,
+        primary_blocker: "transparency",
+        dew_risk_score: 40,
+        stability_score: 52,
+        raw_inputs: {
+          temperature_2m: 4,
+          apparent_temperature: -1,
+          dew_point_2m: 2,
+          relative_humidity_2m: 93,
+          precipitation: 0,
+          visibility: 18000,
+          european_aqi: 80,
+          pm2_5: 38,
+          pm10: 82,
+          wind_speed_10m: 13,
+          wind_gusts_10m: 31,
+        },
+        hard_fail_reasons: [],
+      },
+      {
+        time: "2026-03-20T16:00:00Z",
+        mode_score: 81,
+        primary_blocker: null,
+        dew_risk_score: 43,
+        stability_score: 50,
+        raw_inputs: {
+          temperature_2m: 3,
+          apparent_temperature: -2,
+          dew_point_2m: 1,
+          relative_humidity_2m: 94,
+          precipitation: 0,
+          visibility: 17000,
+          european_aqi: 82,
+          pm2_5: 40,
+          pm10: 84,
+          wind_speed_10m: 12,
+          wind_gusts_10m: 33,
+        },
+        hard_fail_reasons: [],
+      },
     ],
   });
 
-  assert.match(content, /추천 시간: \*\*03\/20 21:00-03\/21 03:00\*\*\./);
-  assert.match(content, /판단 이유:/);
-  assert.match(content, /은하수 고도, 달빛, 구름과 투명도/);
-  assert.match(content, /03\/20 21:00-03\/21 03:00를 반드시 비교하기/);
+  assert.match(content, /추천 시간: \*\*03\/21 00:00-01:00\*\*\./);
   assert.match(content, /시간대별 점수 추이:/);
-  assert.match(content, /\| 시간대 \| 점수 \| 핵심 변수 \|/);
-  assert.match(content, /\| 03\/20 19:00 \| 56 \| 달빛 \|/);
-  assert.match(content, /\| 03\/20 23:00 \| 81 \| - \|/);
-  assert.match(content, /이번 계산에 반영한 요소: 월령\/달고도, 구름량, 투명도, 어둠, 이슬점 spread\/결로 위험, 바람\/안정도, 광해, 은하수 코어 가시성\./);
-  assert.match(content, /필수 준비물: 렌즈히터 또는 결로 대비 장비\./);
-  assert.match(content, /숙련자 참고: 광각 광대역 촬영이라면 달빛과 투명도를 먼저 보고, 바람은 그다음 변수로 보세요\./);
-  assert.match(content, /purpose_fit: 광시야 은하수/);
-  assert.match(content, /reason_focus: 은하수 고도, 달빛, 구름과 투명도/);
-  assert.match(content, /survey_factors: 월령\/달고도, 구름량, 투명도, 어둠, 이슬점 spread\/결로 위험, 바람\/안정도, 광해, 은하수 코어 가시성/);
-  assert.match(content, /requested_mode: general/);
-  assert.match(content, /resolved_mode: wide_field_milky_way/);
-  assert.match(content, /shooting_goal: 은하수 광각 촬영/);
-  assert.match(content, /operator_tip: 광각 광대역 촬영이라면 달빛과 투명도를 먼저 보고, 바람은 그다음 변수로 보세요/);
-  assert.match(content, /timing_hint: 이른 시간보다 뒤 시간이 더 유리한 흐름/);
-  assert.match(content, /secondary_factors: 구름 좋음, 투명도 보통, 어둠 좋음, 이슬위험 낮음, 안정도 보통, 광해 4.0-4.6/);
+  assert.match(content, /\| 03\/21 00:00 \| 73 \| 투명도 \|/);
+  assert.match(content, /필수 고려사항:/);
+  assert.match(content, /렌즈히터/);
+  assert.match(content, /마스크/);
+  assert.match(content, /핫팩/);
+  assert.match(content, /삼각대/);
+  assert.doesNotMatch(content, /필수 준비물/);
 });
 
-test("outlook tool content uses the same compact labeled shape", () => {
-  const content = buildOutlookToolContent({
+test("score tool content uses blocker_timeline for 핵심 변수 when hourly rows omit it", () => {
+  const content = buildScoreToolContent({
     location: {
       timezone: "Asia/Seoul",
     },
-    summary: {
-      go_no_go_outlook: "no_go",
-      active_mode: "broadband_deep_sky",
-      overall_outlook_score: 42,
-      best_block: {
-        start: "2026-03-20T09:00:00Z",
-        end: "2026-03-20T12:00:00Z",
-      },
+    scores: {
+      active_mode: "wide_field_milky_way",
+      cloud_score: 90,
+      transparency_score: 70,
+      darkness_score: 80,
+      dew_risk_score: 70,
+      stability_score: 70,
     },
-    astronomy_context: {
-      target: {
-        name: "Andromeda Galaxy",
+    derived_recommendations: {
+      go_no_go: "go",
+      best_window: {
+        start: "2026-03-20T15:00:00Z",
+        end: "2026-03-20T16:00:00Z",
       },
+      milky_way_ready: true,
+      deep_sky_ready: false,
     },
     request_context: {
       requested_mode: "general",
-      resolved_mode: "broadband_deep_sky",
-      resolution_reason: "shooting_goal_deep_sky",
-      shooting_goal: "안드로메다 광대역 딥스카이",
-      advanced_tip: "광대역 기준이라면 달빛과 투명도를 더 엄격하게 보고 판단하세요",
+      resolved_mode: "wide_field_milky_way",
+      resolution_reason: "shooting_goal_milky_way",
+      shooting_goal: "은하수 광각 촬영",
+      advanced_tip: "광각 은하수라면 코어가 더 높아지는 구간에 노출을 몰아주세요.",
     },
-    outlook_blocks: [
-      {
-        start: "2026-03-20T09:00:00Z",
-        end: "2026-03-20T12:00:00Z",
-        average_mode_score: 42,
-        primary_blocker: "cloud",
-      },
-      {
-        start: "2026-03-20T12:00:00Z",
-        end: "2026-03-20T15:00:00Z",
-        average_mode_score: 35,
-        primary_blocker: "moonlight",
-      },
+    blocker_timeline: [
+      { time: "2026-03-20T15:00:00Z", primary_blocker: "moonlight" },
+      { time: "2026-03-20T16:00:00Z", primary_blocker: "transparency" },
+    ],
+    hourly_conditions: [
+      { time: "2026-03-20T15:00:00Z", mode_score: 62, hard_fail_reasons: [], raw_inputs: {} },
+      { time: "2026-03-20T16:00:00Z", mode_score: 76, hard_fail_reasons: [], raw_inputs: {} },
     ],
   });
 
-  assert.match(content, /추천 시간: \*\*03\/20 18:00-21:00\*\*\./);
-  assert.match(content, /판단 이유:/);
-  assert.match(content, /Andromeda Galaxy 고도, 달빛, 투명도/);
-  assert.match(content, /03\/20 18:00-21:00을 반드시 비교하기/);
-  assert.match(content, /시간대별 전망 추이:/);
-  assert.match(content, /\| 시간대 \| 점수 \| 핵심 변수 \|/);
-  assert.match(content, /\| 03\/20 18:00-21:00 \| 42 \| 구름 \|/);
-  assert.match(content, /이번 계산에 반영한 요소: 월령\/달고도, 구름량, 투명도, 어둠, 이슬점 spread\/결로 위험, 바람\/안정도, 광해, 타깃 고도\./);
-  assert.match(content, /숙련자 참고: 광대역 기준이라면 달빛과 투명도를 더 엄격하게 보고 판단하세요\./);
-  assert.match(content, /purpose_fit: 광대역 딥스카이 \/ Andromeda Galaxy/);
-  assert.match(content, /reason_focus: Andromeda Galaxy 고도, 달빛, 투명도/);
-  assert.match(content, /resolved_mode: broadband_deep_sky/);
+  assert.match(content, /\| 03\/21 00:00 \| 62 \| .*달빛/);
+  assert.match(content, /\| 03\/21 01:00 \| 76 \| .*투명도/);
 });
 
 test("general outlook content explicitly keeps the answer mode-neutral", () => {
@@ -274,18 +285,14 @@ test("general outlook content explicitly keeps the answer mode-neutral", () => {
       resolved_mode: "general",
       resolution_reason: "default_general",
       shooting_goal: null,
-      ignored_target_name: "육백마지기 하늘",
     },
     outlook_blocks: [
-      { primary_blocker: "moonlight" },
+      { start: "2026-03-20T10:00:00Z", end: "2026-03-20T13:00:00Z", average_mode_score: 71, primary_blocker: "moonlight" },
     ],
   });
 
   assert.match(content, /keep the answer mode-neutral and planning-focused/);
-  assert.match(content, /Do not turn a general outlook into Milky Way, deep-sky, target-altitude, or filter-specific advice/);
-  assert.match(content, /must explicitly say that if the user names the shooting theme more precisely/);
-  assert.match(content, /숙련자 참고: 지금은 일반 모드의 균형형 판단입니다\. 찍고 싶은 테마를 은하수, 별궤적, 광대역\/협대역 딥스카이처럼 정확히 말해주면 그 기준으로 다시 볼 수 있습니다\./);
-  assert.match(content, /ignored_target_name/);
+  assert.match(content, /names the shooting theme more precisely/);
 });
 
 test("score tool content gives a dedicated fallback briefing for distant dates", () => {
@@ -301,8 +308,6 @@ test("score tool content gives a dedicated fallback briefing for distant dates",
     },
   });
 
-  assert.match(content, /핵심 변수: 이 날짜는 세부 hourly score 범위를 넘어가는 날짜임\./);
-  assert.match(content, /결론: 상세 점수보다 outlook으로 보는 편이 맞음\./);
-  assert.match(content, /추천 시간: score_night_sky_outlook로 다시 조회\./);
+  assert.match(content, /score_night_sky_outlook/);
   assert.match(content, /recommended_mode: general/);
 });

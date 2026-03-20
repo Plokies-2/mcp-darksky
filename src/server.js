@@ -7,7 +7,6 @@ import {
   getNightSkyOutlookReport,
   getNightSkyScoreReport,
   getForecastDetailPolicy,
-  scoreInputSchema,
 } from "./service.js";
 
 function getAppDomain(publicBaseUrl) {
@@ -172,12 +171,20 @@ function buildScoreTrendTable(report, timezone = "Asia/Seoul") {
     return null;
   }
 
+  const blockerByTime = new Map(
+    (Array.isArray(report?.blocker_timeline) ? report.blocker_timeline : [])
+      .filter((item) => item?.time)
+      .map((item) => [item.time, item.primary_blocker ?? null]),
+  );
+
   return buildMarkdownTable(
     ["시간대", "점수", "핵심 변수"],
     hourlyConditions.map((hour) => [
       formatTrendTimeLabel(hour?.time, timezone),
       formatTrendScore(hour?.mode_score ?? hour?.overall_score),
-      humanizeBlocker(hour?.primary_blocker) === "n/a" ? "-" : humanizeBlocker(hour?.primary_blocker),
+      humanizeBlocker(hour?.primary_blocker ?? blockerByTime.get(hour?.time)) === "n/a"
+        ? "-"
+        : humanizeBlocker(hour?.primary_blocker ?? blockerByTime.get(hour?.time)),
     ]),
   );
 }
@@ -254,6 +261,28 @@ function buildTimingHint(report) {
   return "시간대별 차이가 크지 않으면 best_window만 짧게 안내";
 }
 
+function getPreferredScoreWindow(report) {
+  return report?.derived_recommendations?.best_window ?? report?.derived_recommendations?.mode_best_window ?? null;
+}
+
+function getRelevantHoursForWindow(report, windowValue) {
+  const hourlyConditions = Array.isArray(report?.hourly_conditions) ? report.hourly_conditions : [];
+  if (!windowValue?.start || !windowValue?.end || !hourlyConditions.length) {
+    return [];
+  }
+
+  const start = new Date(windowValue.start).getTime();
+  const end = new Date(windowValue.end).getTime();
+  if (!Number.isFinite(start) || !Number.isFinite(end)) {
+    return [];
+  }
+
+  return hourlyConditions.filter((hour) => {
+    const value = new Date(hour?.time).getTime();
+    return Number.isFinite(value) && value >= start && value <= end;
+  });
+}
+
 function classifyScore(score, { inverse = false } = {}) {
   if (score === null || score === undefined || !Number.isFinite(Number(score))) {
     return "정보 부족";
@@ -294,6 +323,12 @@ function buildSecondaryFactorSummary(report) {
     `안정도 ${classifyScore(scores.stability_score)}`,
     `광해 ${bortleLabel}`,
   ].join(", ");
+}
+
+function getRelevantPreparationHours(report) {
+  const preferredWindow = getPreferredScoreWindow(report);
+  const relevantHours = getRelevantHoursForWindow(report, preferredWindow);
+  return relevantHours.length ? relevantHours : [];
 }
 
 function humanizeMode(mode) {
@@ -382,23 +417,71 @@ function buildOperatorTip(report) {
 }
 
 function buildRequiredPreparation(report) {
-  const items = [];
-  const dewRiskScore = Number(report?.scores?.dew_risk_score);
-  const stabilityScore = Number(report?.scores?.stability_score);
-  const blockerItems = Array.isArray(report?.blocker_timeline)
-    ? report.blocker_timeline.map((item) => item?.primary_blocker).filter(Boolean)
-    : [];
-  const outlookBlockers = Array.isArray(report?.outlook_blocks)
-    ? report.outlook_blocks.map((item) => item?.primary_blocker).filter(Boolean)
-    : [];
-  const blockers = new Set([...blockerItems, ...outlookBlockers]);
-
-  if (report?.derived_recommendations?.dew_heater_needed === true || (Number.isFinite(dewRiskScore) && dewRiskScore < 60) || blockers.has("humidity")) {
-    items.push("렌즈히터 또는 결로 대비 장비");
+  const relevantHours = getRelevantPreparationHours(report);
+  if (!relevantHours.length) {
+    return null;
   }
 
-  if ((Number.isFinite(stabilityScore) && stabilityScore < 55) || blockers.has("stability")) {
-    items.push("무거운 삼각대와 바람 대응 장비");
+  const items = [];
+  const addItem = (text) => {
+    if (text && !items.includes(text)) {
+      items.push(text);
+    }
+  };
+
+  const hasHardWeather = relevantHours.some((hour) => {
+    const raw = hour?.raw_inputs ?? {};
+    return (
+      (Array.isArray(hour?.hard_fail_reasons) && hour.hard_fail_reasons.length > 0)
+      || Number(raw.precipitation) >= 0.2
+      || Number(raw.visibility) <= 3000
+    );
+  });
+  if (hasHardWeather) {
+    addItem("강수나 저시정 가능성이 있어 촬영 자체를 다시 검토하세요");
+  }
+
+  const needsDewMitigation = relevantHours.some((hour) => {
+    const raw = hour?.raw_inputs ?? {};
+    const spread = Number(raw.temperature_2m) - Number(raw.dew_point_2m);
+    return (
+      report?.derived_recommendations?.dew_heater_needed === true
+      || Number(hour?.dew_risk_score) < 45
+      || (Number.isFinite(spread) && spread <= 3)
+      || Number(raw.relative_humidity_2m) >= 90
+    );
+  });
+  if (needsDewMitigation) {
+    addItem("결로 가능성이 높아 렌즈히터나 결로 대비가 필요합니다");
+  }
+
+  const needsMask = relevantHours.some((hour) => {
+    const raw = hour?.raw_inputs ?? {};
+    return Number(raw.european_aqi) >= 75 || Number(raw.pm2_5) >= 35 || Number(raw.pm10) >= 80;
+  });
+  if (needsMask) {
+    addItem("미세먼지 농도가 높아 마스크를 고려하세요");
+  }
+
+  const needsColdProtection = relevantHours.some((hour) => {
+    const raw = hour?.raw_inputs ?? {};
+    const actual = Number(raw.temperature_2m);
+    const apparent = Number(raw.apparent_temperature);
+    if (!Number.isFinite(actual) || !Number.isFinite(apparent)) {
+      return false;
+    }
+    return actual <= 5 && actual - apparent >= 4;
+  });
+  if (needsColdProtection) {
+    addItem("체감온도가 실제 기온보다 크게 낮아 핫팩 같은 보온 대비를 권장합니다");
+  }
+
+  const needsWindMitigation = relevantHours.some((hour) => {
+    const raw = hour?.raw_inputs ?? {};
+    return Number(hour?.stability_score) < 55 || Number(raw.wind_gusts_10m) >= 30 || Number(raw.wind_speed_10m) >= 12;
+  });
+  if (needsWindMitigation) {
+    addItem("바람 영향이 있어 삼각대 하중 보강이나 흔들림 대비가 필요합니다");
   }
 
   return items.length ? items.join(", ") : null;
@@ -457,10 +540,7 @@ export function buildScoreToolContent(report) {
     ?? report?.summary?.active_mode
     ?? "general";
   const timezone = getBriefingTimezone(report);
-  const bestWindow = formatWindowForBriefing(
-    report?.derived_recommendations?.mode_best_window ?? report?.derived_recommendations?.best_window,
-    timezone,
-  );
+  const bestWindow = formatWindowForBriefing(getPreferredScoreWindow(report), timezone);
   const blockers = collectPrimaryBlockers(report).map(humanizeBlocker);
   const verdict = humanizeVerdict(report?.derived_recommendations?.go_no_go);
   const timingHint = buildTimingHint(report);
@@ -493,6 +573,7 @@ export function buildScoreToolContent(report) {
       [
         ...generalModeGuard,
         ...ignoredTargetGuard,
+        "In astrophotography or night-sky contexts, if the user says an ambiguous bare Korean time like '오늘 11시' or '내일 11시' without 오전/오후, interpret it as 23:00 local unless they clearly mean morning, daytime, or noon.",
         "The answer should read like a short field report, with one short paragraph or line per section.",
       ],
     ),
@@ -518,7 +599,7 @@ export function buildScoreToolContent(report) {
     `- ignored_target_name: ${report?.request_context?.ignored_target_name ?? "n/a"}`,
     `- operator_tip: ${operatorTip}`,
     `- readiness: milky_way=${report?.derived_recommendations?.milky_way_ready ?? "n/a"}, deep_sky=${report?.derived_recommendations?.deep_sky_ready ?? "n/a"}`,
-  ].join("\n");
+  ].join("\n").replaceAll("필수 준비물", "필수 고려사항");
 }
 
 export function buildOutlookToolContent(report) {
@@ -560,6 +641,7 @@ export function buildOutlookToolContent(report) {
       [
         ...generalModeGuard,
         ...ignoredTargetGuard,
+        "In astrophotography or night-sky contexts, if the user says an ambiguous bare Korean time like '오늘 11시' or '내일 11시' without 오전/오후, interpret it as 23:00 local unless they clearly mean morning, daytime, or noon.",
         "The answer should read like a short field report, with one short paragraph or line per section.",
       ],
     ),
@@ -584,7 +666,7 @@ export function buildOutlookToolContent(report) {
     `- ignored_target_name: ${report?.request_context?.ignored_target_name ?? "n/a"}`,
     `- operator_tip: ${operatorTip}`,
     `- outlook_blocks: ${blocks.length}`,
-  ].join("\n");
+  ].join("\n").replaceAll("필수 준비물", "필수 고려사항");
 }
 
 function buildLightPollutionToolContent(report) {
@@ -844,17 +926,13 @@ export function createDarkSkyServer({ publicBaseUrl = "http://localhost:3000", k
       withWidget: true,
     }),
     async (input) => {
-      const parsed = scoreInputSchema.parse(input);
+      const parsed = scoreToolInputSchema.parse(input);
       const detailPolicy = getForecastDetailPolicy(parsed.date, parsed.timezone);
       const params = new URLSearchParams({
         date: parsed.date,
         timezone: parsed.timezone,
       });
 
-      if (parsed.latitude !== undefined && parsed.longitude !== undefined) {
-        params.set("latitude", String(parsed.latitude));
-        params.set("longitude", String(parsed.longitude));
-      }
       if (parsed.place_query) {
         params.set("place_query", parsed.place_query);
       }
@@ -865,29 +943,11 @@ export function createDarkSkyServer({ publicBaseUrl = "http://localhost:3000", k
       if (parsed.shooting_goal) {
         params.set("shooting_goal", parsed.shooting_goal);
       }
-      if (parsed.site_profile?.bortle_class !== undefined) {
-        params.set("bortle_class", String(parsed.site_profile.bortle_class));
-      }
-      if (parsed.site_profile?.elevation_m !== undefined) {
-        params.set("elevation_m", String(parsed.site_profile.elevation_m));
-      }
-      if (parsed.site_profile?.near_water !== undefined) {
-        params.set("near_water", String(parsed.site_profile.near_water));
-      }
       if (parsed.mode && parsed.mode !== "general") {
         params.set("mode", parsed.mode);
       }
       if (parsed.target?.name) {
         params.set("target_name", parsed.target.name);
-      }
-      if (parsed.target?.ra_hours !== undefined) {
-        params.set("target_ra_hours", String(parsed.target.ra_hours));
-      }
-      if (parsed.target?.dec_degrees !== undefined) {
-        params.set("target_dec_degrees", String(parsed.target.dec_degrees));
-      }
-      if (parsed.target?.category) {
-        params.set("target_category", parsed.target.category);
       }
 
       const links = {

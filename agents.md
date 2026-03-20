@@ -5,6 +5,11 @@
 - Treat PowerShell terminal output as potentially unreliable for Korean text. `Get-Content` and inline script output may show mojibake even when the file itself is valid UTF-8.
 - When Korean text looks broken in terminal output, do not assume the file is corrupted. Verify with tests, targeted file reads, or a browser/rendered page before rewriting content.
 - Prefer `apply_patch` for Korean text edits and keep files in UTF-8. Avoid shell pipelines that rewrite files through unknown encodings.
+- If `apply_patch` fails because the surrounding Korean text is mojibake in terminal output, patch around stable ASCII anchors such as function names, schema keys, import lines, or nearby English strings instead of trying to match the broken Hangul literally.
+- When inspecting a Korean-heavy file, prefer short line-numbered reads, targeted `rg` searches, tests, or rendered HTML over broad copy-paste from terminal output. Do not use mojibake terminal text as the source of truth for replacements.
+- Before concluding that a Korean prompt, README, or UI string is actually broken, cross-check with a browser page, widget render, or application response. We previously hit false alarms where the terminal view was broken but the file and rendered output were correct.
+- Do not mass-rewrite Korean strings just to "normalize" terminal-visible mojibake. Only edit the exact phrase that needs to change, and verify the rendered result afterward.
+- When updating tests that include Korean text, favor stable structural assertions, English control strings, or semantic markers where possible so terminal encoding noise does not cause unnecessary churn.
 - When passing Korean strings through inline PowerShell or Node snippets, prefer Unicode escape sequences like `\uC548\uBC18\uB370\uAE30` instead of raw Hangul literals.
 - For matching or assertions in tests, prefer stable semantic checks over terminal-visible Korean output when possible.
 - If a prompt page or README contains Korean and the terminal view is suspicious, verify the rendered HTML or application response rather than trusting console glyphs.

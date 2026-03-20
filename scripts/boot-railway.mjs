@@ -47,4 +47,4 @@ async function ensureRuntimeArtifact() {
 }
 
 await ensureRuntimeArtifact();
-await import("../src/index.js");
+await import("../src/http.js");

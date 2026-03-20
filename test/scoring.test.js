@@ -7,6 +7,7 @@ function buildHour(time, overrides = {}) {
   return {
     time,
     temperature_2m: 8,
+    apparent_temperature: 6,
     dew_point_2m: 1,
     relative_humidity_2m: 58,
     cloud_cover: 8,
@@ -301,6 +302,24 @@ test("hourly report preserves galactic core window through visibility context", 
   assert.ok(report.astronomy_context.galactic_core.best_window);
   assert.ok(report.hourly_conditions.some((hour) => hour.raw_inputs.galactic_core_altitude_degrees > 5));
   assert.ok(report.hourly_conditions.some((hour) => hour.milky_way_ready || hour.raw_inputs.galactic_core_altitude_degrees >= 10));
+});
+
+test("milky way best window prefers the short galactic-core peak window", () => {
+  const report = generateReportByDate({
+    date: "2026-05-18",
+    time: "2026-05-18T14:00:00Z",
+    mode: "wide_field_milky_way",
+    hourlyForecast: [
+      buildHour("2026-05-18T12:00:00Z"),
+      buildHour("2026-05-18T13:00:00Z"),
+      buildHour("2026-05-18T14:00:00Z"),
+      buildHour("2026-05-18T15:00:00Z"),
+    ],
+  });
+
+  assert.ok(report.derived_recommendations.best_window);
+  assert.equal(report.derived_recommendations.best_window.hour_count, 2);
+  assert.deepEqual(report.derived_recommendations.best_window, report.astronomy_context.galactic_core.best_window);
 });
 
 test("report exposes score curve, blocker timeline, and ranked windows", () => {

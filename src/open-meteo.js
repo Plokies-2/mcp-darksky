@@ -5,6 +5,7 @@ const AIR_API_BASE = "https://air-quality-api.open-meteo.com/v1/air-quality";
 
 const WEATHER_HOURLY_PARAMS = [
   "temperature_2m",
+  "apparent_temperature",
   "dew_point_2m",
   "relative_humidity_2m",
   "cloud_cover",

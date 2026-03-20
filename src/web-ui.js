@@ -1185,14 +1185,8 @@ function buildSharedScript() {
 }
 
 export function buildInstallPage({ publicBaseUrl }) {
-  const sampleDate = getSuggestedForecastDate("Asia/Seoul");
   const endpoint = `${publicBaseUrl}/mcp`;
-  const apiExample =
-    `${publicBaseUrl}/api/score?latitude=37.6229&longitude=128.7391&date=${sampleDate}&mode=wide_field_milky_way`;
-  const placeApiExample =
-    `${publicBaseUrl}/api/score?place_query=%EC%95%88%EB%B0%98%EB%8D%B0%EA%B8%B0%EB%A7%88%EC%9D%84&date=${sampleDate}&mode=wide_field_milky_way`;
-  const outlookExample =
-    `${publicBaseUrl}/api/score-outlook?place_query=%EC%95%88%EB%B0%98%EB%8D%B0%EA%B8%B0%EB%A7%88%EC%9D%84&date=2026-03-28&mode=wide_field_milky_way`;
+  const githubUrl = "https://github.com/Plokies-2/mcp-darksky";
 
   return `<!doctype html>
 <html lang="ko">
@@ -1211,8 +1205,8 @@ export function buildInstallPage({ publicBaseUrl }) {
               <strong>그 날의 가능성</strong>과 <strong>시간대별 점수 흐름</strong>까지 바로 정리합니다.
             </p>
             <div class="hero-actions">
-              <a class="button button-primary" href="#connect">MCP 주소 확인하기</a>
-              <button type="button" class="button button-secondary" data-open-panel="details-panel">자세히 보기</button>
+              <a class="button button-primary" href="#connect">Apps 연결 주소 보기</a>
+              <a class="button button-secondary" href="${githubUrl}" target="_blank" rel="noreferrer">GitHub 문서 보기</a>
             </div>
             <div class="hero-trust">
               <span>은하수와 딥스카이를 위한 시간대별 분석</span>
@@ -1277,7 +1271,7 @@ export function buildInstallPage({ publicBaseUrl }) {
 | 01:00 | 73 | 투명도 |
 | 02:00 | 81 | 투명도 |</pre>
                       <p><strong>이번 계산에 반영한 요소</strong> 월령/달고도, 은하수 고도, 구름, 투명도, 이슬점 spread, 바람/안정도, 광해.</p>
-                      <p><strong>필수 준비물</strong> 새벽 결로 가능성이 있으면 렌즈히터를 챙기고, 바람이 남아 있으면 무거운 삼각대를 우선하세요.</p>
+                      <p><strong>필수 고려사항</strong> 결로 가능성이 높게 계산되면 렌즈히터를, 바람 점수가 낮게 나오면 삼각대 하중 보강을 우선하세요.</p>
                       <p><strong>숙련자 참고</strong> 광각 은하수라면 달빛이 빠진 뒤 1-3시에 노출을 몰아주고, 11시는 전경 구도와 장비 밸런스 확인 시간으로 쓰는 편이 안전합니다.</p>
                     </div>
                   </div>
@@ -1306,28 +1300,28 @@ export function buildInstallPage({ publicBaseUrl }) {
         <div class="shell">
           <div class="section-header">
             <div class="section-label">바로 연결</div>
-            <h2>ChatGPT에 붙이면 바로 쓸 수 있습니다</h2>
-            <p>설치는 짧게, 이해는 쉽게. 처음 보는 사람도 바로 연결하고 필요한 기준만 빠르게 확인할 수 있게 정리했습니다.</p>
+            <h2>ChatGPT Apps에서 바로 연결해 쓰세요</h2>
+            <p>이 페이지는 빠른 시작만 남겼습니다. 연결 주소만 복사해 붙여 넣고, 자세한 개발 문서와 호스팅 안내는 GitHub에서 확인하면 됩니다.</p>
           </div>
 
           <div class="grid grid-2">
             <article class="panel content-card">
-              <span class="feature-kicker">MCP 연결</span>
-              <h3>ChatGPT 연결 주소</h3>
-              <p class="copy">이 주소를 custom MCP connector에 넣으면 바로 연결됩니다. 연결 후에는 장소명만으로도 바로 물어볼 수 있습니다.</p>
+              <span class="feature-kicker">GPT Apps 연결</span>
+              <h3>연결 주소 복사</h3>
+              <p class="copy">ChatGPT Apps의 custom connector 설정에 이 주소를 넣으면 바로 연결됩니다. 연결이 끝나면 장소명만으로도 밤하늘 촬영 조건을 바로 물어볼 수 있습니다.</p>
               <input class="endpoint-box" value="${endpoint}" readonly id="mcp-endpoint" />
               <div class="card-actions">
-                <button type="button" class="button button-primary" data-copy="#mcp-endpoint">MCP 주소 복사</button>
+                <button type="button" class="button button-primary" data-copy="#mcp-endpoint">연결 주소 복사</button>
               </div>
             </article>
 
             <article class="panel content-card">
-              <span class="feature-kicker">무엇을 보는지</span>
-              <h3>데이터와 점수 기준을 먼저 확인하세요</h3>
-              <p class="copy">어떤 정보를 가져오고, 점수가 어떻게 정해지며, 광해 등급이 어떤 데이터 기준으로 계산되는지 한 번에 볼 수 있습니다.</p>
-              <input class="endpoint-box" value="점수 구성 · 광해 추정 · 촬영 모드 · outlook 기준" readonly id="details-summary" />
+              <span class="feature-kicker">기술 문서</span>
+              <h3>개발 정보는 GitHub에서</h3>
+              <p class="copy">README에는 MCP/API 설명, 직접 호스팅, 공개 엔드포인트 정책, 데이터 소스와 활용 주의사항을 모아뒀습니다.</p>
+              <input class="endpoint-box" value="${githubUrl}" readonly id="github-docs" />
               <div class="card-actions">
-                <button type="button" class="button button-secondary" data-open-panel="details-panel">자세히 보기</button>
+                <a class="button button-secondary" href="${githubUrl}" target="_blank" rel="noreferrer">GitHub 열기</a>
               </div>
             </article>
           </div>
@@ -1342,8 +1336,8 @@ export function buildInstallPage({ publicBaseUrl }) {
               <p class="muted">추천 시간, 판단 이유, 시간대별 점수 표, 계산에 반영한 요소, 필요 시 준비물, 숙련자 참고까지 한 번에 이어서 볼 수 있습니다.</p>
             </div>
             <div class="panel">
-              <strong>무엇이 문제인지</strong>
-              <p class="muted">월광인지, 투명도인지, 광해인지 구분해서 설명하므로 초보자도 원인을 이해하기 쉽습니다.</p>
+              <strong>바로 연결하고 바로 홍보할 수 있는 링크</strong>
+              <p class="muted">설치 페이지는 가볍게 유지하고, 세부 설명은 GitHub 문서로 보내므로 처음 보는 사람에게 공유하기도 쉽습니다.</p>
             </div>
           </div>
         </div>
@@ -1382,144 +1376,8 @@ export function buildInstallPage({ publicBaseUrl }) {
         </div>
       </section>
 
-      <section class="section">
-        <div class="shell">
-          <div class="section-header">
-            <div class="section-label">핵심 구현</div>
-            <h2>필요하면 API와 로직 정보도 바로 확인할 수 있습니다</h2>
-            <p>첫 화면은 광고 중심으로 두되, 연결 뒤 검증이 필요한 사람을 위해 바로 테스트할 수 있는 예시도 남겨뒀습니다.</p>
-          </div>
-          <div class="grid grid-3">
-            <article class="panel feature-card">
-              <span class="feature-kicker">좌표 기반 API</span>
-              <h3>좌표로 바로 조회</h3>
-              <p class="copy">위도, 경도, 날짜만 있으면 구조화된 점수 결과를 JSON으로 받을 수 있습니다.</p>
-              <pre id="api-example">${apiExample}</pre>
-              <div class="card-actions">
-                <button type="button" class="button button-secondary" data-copy="#api-example">예시 복사</button>
-              </div>
-            </article>
-
-            <article class="panel feature-card">
-              <span class="feature-kicker">지명 기반 API</span>
-              <h3>장소명으로 조회</h3>
-              <p class="copy">카카오 Local API가 설정되어 있으면 한국 지명만으로 좌표를 해석해 조회할 수 있습니다.</p>
-              <pre id="place-api-example">${placeApiExample}</pre>
-              <div class="card-actions">
-                <button type="button" class="button button-secondary" data-copy="#place-api-example">예시 복사</button>
-              </div>
-            </article>
-
-            <article class="panel feature-card">
-              <span class="feature-kicker">원거리 날짜 API</span>
-              <h3>먼 날짜는 outlook로</h3>
-              <p class="copy">6일 이후 날짜는 false precision을 줄이기 위해 full detail 대신 간단한 outlook 응답으로 전환됩니다.</p>
-              <pre id="outlook-example">${outlookExample}</pre>
-              <div class="card-actions">
-                <button type="button" class="button button-secondary" data-copy="#outlook-example">예시 복사</button>
-              </div>
-            </article>
-          </div>
-        </div>
-      </section>
-
       <div class="footer-note shell">
-        mcp-darksky는 Open-Meteo 예보, 천문 계산, 한국형 광해 추정, 목표 고도 분석을 조합해 밤하늘 촬영 판단을 돕습니다.
-      </div>
-    </div>
-    <div class="details-overlay" id="details-panel" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="details-title">
-      <div class="details-panel">
-        <div class="details-header">
-          <div>
-            <div class="section-label">자세히</div>
-            <h2 id="details-title">이 도구가 무엇을 보고 어떻게 점수를 만드는지</h2>
-            <p>mcp-darksky는 오늘 밤 바로 쓸 수 있는 정보만 추려 AI에 넘기기 위해 만들어졌습니다. 예보, 천문 정보, 광해 추정, 목표 고도까지 한 번에 모아서 “지금 가도 되는지”와 “몇 시가 제일 좋은지”를 답합니다.</p>
-          </div>
-          <button type="button" class="details-close" data-close-panel="details-panel" aria-label="자세히 패널 닫기">✕</button>
-        </div>
-
-        <div class="details-content">
-          <div class="details-grid">
-            <article class="details-card">
-              <span class="details-kicker">무엇을 가져오나요?</span>
-              <h3>날씨, 공기질, 천문 정보를 함께 읽습니다</h3>
-              <p>한 가지 예보만 보는 대신 밤하늘 촬영에 직접 영향을 주는 정보만 모아 씁니다.</p>
-              <ul>
-                <li>Open-Meteo에서 기온, 이슬점, 습도, 총운량과 저·중·고층 구름, 시정, 강수, 풍속과 돌풍을 가져옵니다.</li>
-                <li>같은 흐름에서 PM2.5, PM10, dust, aerosol optical depth, AQI, 오존과 이산화질소를 받아 투명도 해석에 반영합니다.</li>
-                <li>천문박명, 달의 고도와 조도, 은하수 중심부 가시성, 목표 고도와 airmass는 내부 천문 계산으로 바로 만듭니다.</li>
-              </ul>
-            </article>
-
-            <article class="details-card">
-              <span class="details-kicker">점수는 어떻게 정해지나요?</span>
-              <h3>한 점수보다 밤 전체의 흐름을 보여줍니다</h3>
-              <p>최종 점수는 다섯 하위 점수를 묶어 계산하고, 동시에 시간대별 score curve와 best window를 같이 만듭니다.</p>
-              <div class="formula-block">
-                <code>overall_score = w_cloud × cloud_score
-+ w_transparency × transparency_score
-+ w_darkness × darkness_score
-+ w_dew × dew_risk_score
-+ w_stability × stability_score</code>
-                <code>mode_score = mode_weights(weather, darkness, target_altitude, moon_separation)</code>
-                <code>best_window = argmax(avg(score_curve[t₀ ... tₙ]))</code>
-              </div>
-              <ul>
-                <li>핵심 하위 점수는 cloud, transparency, darkness, dew risk, stability입니다.</li>
-                <li>강수, 안개, 매우 낮은 시정 같은 조건은 hard fail로 따로 표시합니다.</li>
-                <li>결과는 overall score 하나로 끝나지 않고 score curve, blocker timeline, best window, window rankings로 이어집니다.</li>
-              </ul>
-            </article>
-
-            <article class="details-card">
-              <span class="details-kicker">광해 등급</span>
-              <h3>한국형 보정이 들어간 추정 Bortle-like 값입니다</h3>
-              <p>광해는 NASA 야간조도 데이터를 바탕으로 추정한 Bortle-like 값으로 보여주며, 장소 비교와 시간대 해설에 바로 쓸 수 있도록 한국 기준 보정을 함께 적용합니다.</p>
-              <ul>
-                <li>NASA Black Marble annual VIIRS 제품인 VNP46A4와 VJ146A4의 2025년 snow-free composite(A2025001 계열)를 사용합니다.</li>
-                <li>현재 광해 추정 방식은 <code>2026-03-19-continuous-bortle-v2-korea-calibrated</code> 버전입니다.</li>
-                <li>결과는 공식 보틀 등급이 아니라 <code>estimated_bortle_center</code>와 <code>estimated_bortle_range</code> 형태의 추정값입니다.</li>
-              </ul>
-              <div class="details-meta">
-                <div class="panel">
-                  <strong>입력 데이터</strong>
-                  <span>VNP46A4 / VJ146A4<br />2025 annual snow-free composite</span>
-                </div>
-                <div class="panel">
-                  <strong>함께 보여주는 값</strong>
-                  <span>한국 내 밝기·어두움 퍼센타일<br />regional glow와 confidence</span>
-                </div>
-                <div class="panel">
-                  <strong>출력 형태</strong>
-                  <span>중심값과 범위를 함께 보여줘 장소 간 비교와 AI 해설에 바로 쓸 수 있습니다.</span>
-                </div>
-              </div>
-            </article>
-
-            <article class="details-card">
-              <span class="details-kicker">촬영 모드</span>
-              <h3>같은 밤도 무엇을 찍느냐에 따라 해석이 달라집니다</h3>
-              <p>달빛과 안정성, 목표 고도는 촬영 방식에 따라 중요도가 달라서 모드별 가중치를 따로 둡니다.</p>
-              <ul>
-                <li><code>wide_field_milky_way</code> · <code>wide_field_nightscape</code></li>
-                <li><code>broadband_deep_sky</code> · <code>narrowband_deep_sky</code></li>
-                <li><code>star_trail</code> · <code>general</code></li>
-                <li>목표를 넣으면 달-목표 separation, 목표 고도, airmass까지 같이 계산해 “몇 시가 가장 좋은지”를 더 정확히 정리합니다.</li>
-              </ul>
-            </article>
-
-            <article class="details-card details-wide">
-              <span class="details-kicker">먼 날짜는 어떻게 처리하나요?</span>
-              <h3>6일 이후는 상세 점수 대신 outlook로 전환합니다</h3>
-              <p>먼 날짜에 시간별 점수를 너무 세밀하게 보여주면 오히려 잘못된 확신을 줄 수 있습니다. 그래서 가까운 날짜와 먼 날짜를 다르게 다룹니다.</p>
-              <ul>
-                <li>0일에서 5일 이내는 시간대별 score curve, blocker timeline, best window까지 상세하게 보여줍니다.</li>
-                <li>6일 이후는 <code>score_night_sky_outlook</code> 경로로 전환해 블록 단위 전망과 핵심 해설만 남깁니다.</li>
-                <li>즉, 가까운 날짜는 “정밀한 실행 판단”, 먼 날짜는 “거친 계획 수립”에 맞춰 설계되어 있습니다.</li>
-              </ul>
-            </article>
-          </div>
-        </div>
+        mcp-darksky는 밤하늘 촬영 판단을 빠르게 돕는 GPT Apps 연결 입구와 기술 문서를 함께 제공합니다.
       </div>
     </div>
     <div class="toast" id="toast">복사했습니다.</div>
@@ -1562,7 +1420,7 @@ export function buildHomePage({ publicBaseUrl }) {
               </div>
               <div class="preview-item">
                 <strong>출력</strong>
-                <p>추천 시간, 이유 비교, 시간대별 점수 표, 계산 요소, 준비물, 숙련자 참고</p>
+                <p>추천 시간, 이유 비교, 시간대별 점수 표, 계산 요소, 고려사항, 숙련자 참고</p>
               </div>
               <div class="preview-item">
                 <strong>활용</strong>

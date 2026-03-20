@@ -11,6 +11,7 @@ function buildWeatherPayload(timezone = "Asia/Seoul") {
         "2026-03-20T19:00",
       ],
       temperature_2m: [3.2, 2.8],
+      apparent_temperature: [0.3, -0.8],
       dew_point_2m: [-1.0, -1.2],
       relative_humidity_2m: [66, 68],
       cloud_cover: [12, 18],
@@ -80,6 +81,7 @@ test("fetchForecastBundle merges weather and air payloads when both succeed", as
   assert.equal(bundle.airQualityIncluded, true);
   assert.equal(bundle.hourly.length, 2);
   assert.equal(bundle.hourly[0].temperature_2m, 3.2);
+  assert.equal(bundle.hourly[0].apparent_temperature, 0.3);
   assert.equal(bundle.hourly[0].pm2_5, 8);
   assert.equal(bundle.sourceAttribution.length, 2);
 });
