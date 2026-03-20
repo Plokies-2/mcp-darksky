@@ -6,6 +6,7 @@ import {
   getNightSkyScoreReport,
   parseOutlookQuery,
   parseScoreQuery,
+  reconcileObservationPoint,
 } from "../src/service.js";
 
 test("parseScoreQuery converts HTTP query values into score input", () => {
@@ -218,6 +219,23 @@ test("getNightSkyScoreReport resolves purpose-fit mode for distant-date fallback
   assert.match(report.recommended_api_url, /shooting_goal=/);
 });
 
+test("getNightSkyScoreReport ignores unknown name-only targets instead of crashing", async () => {
+  const report = await getNightSkyScoreReport({
+    latitude: 37.6229,
+    longitude: 128.7391,
+    date: "2026-03-26",
+    timezone: "Asia/Seoul",
+    mode: "star_trail",
+    target: {
+      name: "Polaris/하늘",
+    },
+    publicBaseUrl: "https://darksky.example.com",
+  });
+
+  assert.equal(report.report_kind, "fallback_required");
+  assert.equal(report.recommended_input.target.name, "Polaris/하늘");
+});
+
 test("buildPromptText references JSON API entrypoint", () => {
   const promptText = buildPromptText({
     publicBaseUrl: "https://darksky.example.com",
@@ -227,4 +245,56 @@ test("buildPromptText references JSON API entrypoint", () => {
   assert.match(promptText, /request_context, scores, derived_recommendations, risk_flags/);
   assert.match(promptText, /place_query/);
   assert.match(promptText, /shooting_goal/);
+});
+
+test("reconcileObservationPoint prefers place_query when hallucinated coordinates conflict materially", () => {
+  const point = reconcileObservationPoint(
+    {
+      latitude: 37.1,
+      longitude: 128.5,
+      place_query: "안반데기",
+      location_name: "안반데기",
+    },
+    {
+      latitude: 37.6229,
+      longitude: 128.7391,
+      locationName: "안반데기",
+      addressName: "강원특별자치도 강릉시 왕산면",
+      roadAddressName: "",
+      placeName: "안반데기",
+      provider: "kakao_local",
+    },
+  );
+
+  assert.equal(point.resolvedFrom, "place_query");
+  assert.equal(point.coordinatesOverriddenByPlaceQuery, true);
+  assert.ok(point.coordinateConflictKm > 20);
+  assert.deepEqual(point.inputCoordinates, {
+    latitude: 37.1,
+    longitude: 128.5,
+  });
+});
+
+test("reconcileObservationPoint keeps explicit coordinates when they are close to the resolved place", () => {
+  const point = reconcileObservationPoint(
+    {
+      latitude: 37.6229,
+      longitude: 128.7391,
+      place_query: "안반데기",
+      location_name: "안반데기",
+    },
+    {
+      latitude: 37.6235,
+      longitude: 128.7394,
+      locationName: "안반데기",
+      addressName: "강원특별자치도 강릉시 왕산면",
+      roadAddressName: "",
+      placeName: "안반데기",
+      provider: "kakao_local",
+    },
+  );
+
+  assert.equal(point.resolvedFrom, "coordinates");
+  assert.equal(point.coordinatesOverriddenByPlaceQuery, false);
+  assert.ok(point.coordinateMatchKm < 1);
 });

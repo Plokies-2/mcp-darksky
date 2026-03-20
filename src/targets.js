@@ -2,7 +2,7 @@ const TARGETS = [
   {
     key: "milky-way-core",
     canonicalName: "Milky Way Core",
-    aliases: ["milky way", "milky way core", "galactic core", "galactic center", "sagittarius a*", "mw core", "은하수", "은하수 코어"],
+    aliases: ["milky way", "milky way core", "galactic core", "galactic center", "sagittarius a*", "mw core", "은하수", "은하수 코어", "은하수 중심"],
     raHours: 17 + 45 / 60 + 40 / 3600,
     decDegrees: -(29 + 0 / 60 + 28 / 3600),
     category: "milky_way",
@@ -124,6 +124,13 @@ export function findTargetMention(text) {
 export function resolveTargetInput(targetInput) {
   if (!targetInput) {
     return null;
+  }
+
+  if (targetInput.name) {
+    const hinted = findTargetMention(targetInput.name);
+    if (hinted?.name) {
+      return resolveTargetDefinition(hinted.name);
+    }
   }
 
   if (targetInput.ra_hours !== undefined || targetInput.dec_degrees !== undefined) {

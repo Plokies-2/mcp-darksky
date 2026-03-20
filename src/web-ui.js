@@ -400,6 +400,8 @@ function buildSharedHead({ title }) {
 
       .chatgpt-assistant {
         max-width: 92%;
+        display: grid;
+        gap: 10px;
         padding: 2px 0 0;
         color: #10151c;
         font-size: 14px;
@@ -412,6 +414,19 @@ function buildSharedHead({ title }) {
 
       .assistant-truncate {
         color: #6b7280;
+      }
+
+      .assistant-report-table {
+        margin: 0;
+        padding: 12px 14px;
+        border-radius: 16px;
+        background: rgba(17, 24, 39, 0.05);
+        border: 1px solid rgba(17, 24, 39, 0.08);
+        font-family: "SF Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+        font-size: 12px;
+        line-height: 1.7;
+        white-space: pre-wrap;
+        word-break: break-word;
       }
 
       .chatgpt-composer {
@@ -1253,8 +1268,17 @@ export function buildInstallPage({ publicBaseUrl }) {
                   <div class="chatgpt-message">
                     <div class="chatgpt-label">AI의 응답:</div>
                     <div class="chatgpt-assistant">
-                      <p>11시에도 촬영은 가능하지만, 그 시간만 보고 바로 본촬영에 들어가기에는 조금 이릅니다. 이번 결과에서는 초반 점수가 56점으로 시작하고 자정 이후 61점 안팎으로 올라간 뒤, 새벽 1시부터 3시 사이에 73점에서 81점까지 가장 좋게 형성됩니다. 그래서 육백마지기에서 은하수를 노린다면 11시에는 이동과 장비 세팅, 구도 확인 정도로 쓰고 실제 메인 촬영은 1시 이후로 잡는 편이 더 유리합니다.</p>
-                      <p>이렇게 보는 이유는 시간대별 blocker가 초반에는 달빛이고, 뒤로 갈수록 대기 투명도로 바뀌기 때문입니다. 동시에 광해 추정은 Bortle-like 4.0~4.6 수준이라 장소 자체는 충분히 가능성이 있고, best window도 01:00~03:00으로 잡혔습니다. 정리하면 내일 밤 11시는 출발하기 괜찮은 시점이고, 가장 좋은 결과는 새벽 구간에서 기대하는 편이 맞습니다 <span class="assistant-truncate"> ...</span></p>
+                      <p><strong>추천 시간</strong> 01:00-03:00이 가장 좋습니다.</p>
+                      <p><strong>판단 이유</strong> 은하수 고도는 새벽으로 갈수록 유리하고, 23시는 달빛 영향이 남아 있어 본촬영보다는 이동과 장비 세팅 쪽이 더 알맞습니다. 구름은 적지만 초반보다 새벽 구간의 조건이 더 좋습니다.</p>
+                      <pre class="assistant-report-table">| 시간대 | 점수 | 핵심 변수 |
+| --- | --- | --- |
+| 23:00 | 56 | 달빛 |
+| 00:00 | 61 | 달빛 |
+| 01:00 | 73 | 투명도 |
+| 02:00 | 81 | 투명도 |</pre>
+                      <p><strong>이번 계산에 반영한 요소</strong> 월령/달고도, 은하수 고도, 구름, 투명도, 이슬점 spread, 바람/안정도, 광해.</p>
+                      <p><strong>필수 준비물</strong> 새벽 결로 가능성이 있으면 렌즈히터를 챙기고, 바람이 남아 있으면 무거운 삼각대를 우선하세요.</p>
+                      <p><strong>숙련자 참고</strong> 광각 은하수라면 달빛이 빠진 뒤 1-3시에 노출을 몰아주고, 11시는 전경 구도와 장비 밸런스 확인 시간으로 쓰는 편이 안전합니다.</p>
                     </div>
                   </div>
                 </div>
@@ -1315,7 +1339,7 @@ export function buildInstallPage({ publicBaseUrl }) {
             </div>
             <div class="panel">
               <strong>몇 시가 가장 좋은지</strong>
-              <p class="muted">best window와 blocker timeline으로, 좋은 시간과 감점 요인을 시간대별로 바로 볼 수 있습니다.</p>
+              <p class="muted">추천 시간, 판단 이유, 시간대별 점수 표, 계산에 반영한 요소, 필요 시 준비물, 숙련자 참고까지 한 번에 이어서 볼 수 있습니다.</p>
             </div>
             <div class="panel">
               <strong>무엇이 문제인지</strong>
@@ -1538,7 +1562,7 @@ export function buildHomePage({ publicBaseUrl }) {
               </div>
               <div class="preview-item">
                 <strong>출력</strong>
-                <p>overall score, score curve, best windows, blocker timeline, 광해 추정, 타깃 고도</p>
+                <p>추천 시간, 이유 비교, 시간대별 점수 표, 계산 요소, 준비물, 숙련자 참고</p>
               </div>
               <div class="preview-item">
                 <strong>활용</strong>
@@ -1546,6 +1570,50 @@ export function buildHomePage({ publicBaseUrl }) {
               </div>
             </div>
           </aside>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="shell">
+          <div class="section-header">
+            <div class="section-label">촬영 모드</div>
+            <h2>무엇을 찍느냐에 따라 보는 기준도 달라집니다</h2>
+            <p>같은 밤이라도 촬영 목적이 다르면 중요한 변수도 달라집니다. 자주 쓰는 다섯 가지 모드를 빠르게 고를 수 있게 정리했습니다.</p>
+          </div>
+
+          <div class="grid grid-3">
+            <article class="panel feature-card">
+              <span class="feature-kicker">wide_field_milky_way</span>
+              <h3>광각 은하수</h3>
+              <p class="copy">달빛과 어둠, 은하수 코어 타이밍을 우선해서 봅니다.</p>
+            </article>
+
+            <article class="panel feature-card">
+              <span class="feature-kicker">wide_field_nightscape</span>
+              <h3>광각 야경</h3>
+              <p class="copy">하늘과 지상을 함께 찍기 좋은 시간을 봅니다.</p>
+            </article>
+
+            <article class="panel feature-card">
+              <span class="feature-kicker">broadband_deep_sky</span>
+              <h3>광대역 딥스카이</h3>
+              <p class="copy">어두운 하늘과 투명도, 타깃 고도를 중요하게 봅니다.</p>
+            </article>
+          </div>
+
+          <div class="grid grid-2" style="margin-top: 18px;">
+            <article class="panel feature-card">
+              <span class="feature-kicker">narrowband_deep_sky</span>
+              <h3>협대역 딥스카이</h3>
+              <p class="copy">달빛보다 안정도와 타깃 고도에 더 강한 편입니다.</p>
+            </article>
+
+            <article class="panel feature-card">
+              <span class="feature-kicker">star_trail</span>
+              <h3>별궤적</h3>
+              <p class="copy">긴 맑은 시간과 흔들림 적은 조건을 우선해서 봅니다.</p>
+            </article>
+          </div>
         </div>
       </section>
 

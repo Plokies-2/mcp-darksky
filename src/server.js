@@ -138,6 +138,66 @@ function formatWindowForBriefing(windowValue, timezone = "Asia/Seoul") {
   return "n/a";
 }
 
+function formatTrendTimeLabel(value, timezone = "Asia/Seoul") {
+  const formatted = formatLocalDateTimeLabel(value, timezone);
+  if (!formatted) {
+    return "n/a";
+  }
+  return `${formatted.dateLabel} ${formatted.timeLabel}`;
+}
+
+function formatTrendScore(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return "n/a";
+  }
+  return Number.isInteger(numeric) ? String(numeric) : numeric.toFixed(1);
+}
+
+function escapeMarkdownCell(value) {
+  return String(value ?? "n/a").replace(/\|/g, "/").replace(/\s+/g, " ").trim();
+}
+
+function buildMarkdownTable(headers, rows) {
+  return [
+    `| ${headers.join(" | ")} |`,
+    `| ${headers.map((_) => "---").join(" | ")} |`,
+    ...rows.map((row) => `| ${row.map(escapeMarkdownCell).join(" | ")} |`),
+  ].join("\n");
+}
+
+function buildScoreTrendTable(report, timezone = "Asia/Seoul") {
+  const hourlyConditions = Array.isArray(report?.hourly_conditions) ? report.hourly_conditions : [];
+  if (!hourlyConditions.length) {
+    return null;
+  }
+
+  return buildMarkdownTable(
+    ["시간대", "점수", "핵심 변수"],
+    hourlyConditions.map((hour) => [
+      formatTrendTimeLabel(hour?.time, timezone),
+      formatTrendScore(hour?.mode_score ?? hour?.overall_score),
+      humanizeBlocker(hour?.primary_blocker) === "n/a" ? "-" : humanizeBlocker(hour?.primary_blocker),
+    ]),
+  );
+}
+
+function buildOutlookTrendTable(report, timezone = "Asia/Seoul") {
+  const outlookBlocks = Array.isArray(report?.outlook_blocks) ? report.outlook_blocks : [];
+  if (!outlookBlocks.length) {
+    return null;
+  }
+
+  return buildMarkdownTable(
+    ["시간대", "점수", "핵심 변수"],
+    outlookBlocks.map((block) => [
+      formatWindowForBriefing({ start: block?.start, end: block?.end }, timezone),
+      formatTrendScore(block?.average_mode_score ?? block?.average_overall_score),
+      humanizeBlocker(block?.primary_blocker) === "n/a" ? "-" : humanizeBlocker(block?.primary_blocker),
+    ]),
+  );
+}
+
 function collectPrimaryBlockers(report, limit = 2) {
   const items = Array.isArray(report?.blocker_timeline) ? report.blocker_timeline : [];
   return Array.from(
@@ -257,21 +317,145 @@ function buildPurposeFitLabel(report) {
   return [humanizeMode(resolvedMode), targetName].filter(Boolean).join(" / ");
 }
 
+function buildReasonFocus(report) {
+  const resolvedMode =
+    report?.request_context?.resolved_mode
+    ?? report?.scores?.active_mode
+    ?? report?.summary?.active_mode
+    ?? "general";
+  const targetName = report?.astronomy_context?.target?.name ?? "타깃";
+
+  const labels = {
+    general: "구름, 달빛, 투명도, 결로와 안정도",
+    wide_field_milky_way: "은하수 고도, 달빛, 구름과 투명도",
+    wide_field_nightscape: "달빛, 구름, 바람과 안정도",
+    broadband_deep_sky: `${targetName} 고도, 달빛, 투명도`,
+    narrowband_deep_sky: `${targetName} 고도, 안정도, 달빛`,
+    star_trail: "긴 맑은 구간, 구름, 바람과 결로",
+  };
+
+  return labels[resolvedMode] ?? labels.general;
+}
+
+function buildSurveyFactors(report) {
+  const resolvedMode =
+    report?.request_context?.resolved_mode
+    ?? report?.scores?.active_mode
+    ?? report?.summary?.active_mode
+    ?? "general";
+
+  const baseFactors = ["월령/달고도", "구름량", "투명도", "어둠", "이슬점 spread/결로 위험", "바람/안정도", "광해"];
+  const modeExtras = {
+    general: [],
+    wide_field_milky_way: ["은하수 코어 가시성"],
+    wide_field_nightscape: ["전경과 하늘의 균형"],
+    broadband_deep_sky: ["타깃 고도"],
+    narrowband_deep_sky: ["타깃 고도"],
+    star_trail: ["장시간 맑은 구간"],
+  };
+
+  return [...baseFactors, ...(modeExtras[resolvedMode] ?? [])].join(", ");
+}
+
+function buildOperatorTip(report) {
+  const resolvedMode =
+    report?.request_context?.resolved_mode
+    ?? report?.scores?.active_mode
+    ?? report?.summary?.active_mode
+    ?? "general";
+  const advancedTip = report?.request_context?.advanced_tip ?? null;
+
+  if (advancedTip) {
+    return advancedTip;
+  }
+
+  const defaults = {
+    general: "지금은 일반 모드의 균형형 판단입니다. 찍고 싶은 테마를 은하수, 별궤적, 광대역/협대역 딥스카이처럼 정확히 말해주면 그 기준으로 다시 볼 수 있습니다.",
+    wide_field_milky_way: "광각 은하수는 달빛이 빠진 뒤와 코어 고도가 올라오는 구간에 노출을 몰아주는 편이 안전합니다.",
+    wide_field_nightscape: "전경을 함께 넣는다면 달 방향, 그림자, 바람에 의한 흔들림까지 같이 보고 구도를 고정하세요.",
+    broadband_deep_sky: "광대역은 달빛과 투명도 변화에 민감하니 best window에 촬영 시간을 집중하는 편이 유리합니다.",
+    narrowband_deep_sky: "협대역 필터가 있다면 달빛에는 조금 더 버티지만, 타깃 고도와 안정도는 계속 엄격하게 보세요.",
+    star_trail: "별궤적은 장시간 누적이라 구름 유입, 배터리, 결로 관리가 점수만큼 중요합니다.",
+  };
+
+  return defaults[resolvedMode] ?? defaults.general;
+}
+
+function buildRequiredPreparation(report) {
+  const items = [];
+  const dewRiskScore = Number(report?.scores?.dew_risk_score);
+  const stabilityScore = Number(report?.scores?.stability_score);
+  const blockerItems = Array.isArray(report?.blocker_timeline)
+    ? report.blocker_timeline.map((item) => item?.primary_blocker).filter(Boolean)
+    : [];
+  const outlookBlockers = Array.isArray(report?.outlook_blocks)
+    ? report.outlook_blocks.map((item) => item?.primary_blocker).filter(Boolean)
+    : [];
+  const blockers = new Set([...blockerItems, ...outlookBlockers]);
+
+  if (report?.derived_recommendations?.dew_heater_needed === true || (Number.isFinite(dewRiskScore) && dewRiskScore < 60) || blockers.has("humidity")) {
+    items.push("렌즈히터 또는 결로 대비 장비");
+  }
+
+  if ((Number.isFinite(stabilityScore) && stabilityScore < 55) || blockers.has("stability")) {
+    items.push("무거운 삼각대와 바람 대응 장비");
+  }
+
+  return items.length ? items.join(", ") : null;
+}
+
 function buildReplyContractLines(extraLines = []) {
   return [
     "Reply in Korean when the user asked in Korean.",
-    "Prefer a labeled 4-6 line answer, not a paragraph.",
+    "Write like a concise report with clear section labels, not a casual paragraph.",
     "Frame the answer as a comparison between what the user asked for and what the report supports.",
     "If the user asked about a specific time or target, answer that exact request first and compare it against the best window briefly.",
     "If request_context.resolved_mode is more specific than requested_mode, explain with the resolved purpose instead of falling back to generic weather commentary.",
     "Use concise wording, not a single-sentence restriction.",
-    "Use this default order: 핵심 변수, 결론, 요청 시점, 기타 변수, 추천 시간.",
+    "Always present the time-based score trend as a compact markdown table when rows are available. Use the columns 시간대, 점수, 핵심 변수.",
+    "Always emphasize the best time window with bold markdown.",
+    "Use this fixed order by default: 추천 시간, 판단 이유, 시간대별 점수 추이 표, 이번 계산에 반영한 요소, 필요하면 필수 준비물, 숙련자 참고.",
     "Do not enumerate hourly scores, JSON fields, long background explanation, or a closing offer unless the user asks.",
     ...extraLines,
   ];
 }
 
+function buildScoreFallbackToolContent(report) {
+  const recommendedTool = report?.recommended_tool ?? "score_night_sky_outlook";
+  const recommendedMode = report?.recommended_input?.mode ?? "general";
+  const requestedDate = report?.detail_policy?.requested_date ?? report?.recommended_input?.date ?? "n/a";
+
+  return [
+    ...buildReplyContractLines([
+      "This payload means the requested date is outside the full-detail score horizon.",
+      "Do not invent a detailed hourly verdict from this payload.",
+      "Do not fabricate a time-based score table when full-detail rows are unavailable.",
+      "Tell the user that the date should be handled by the outlook tool and keep the answer brief.",
+    ]),
+    "Use this answer skeleton by default:",
+    "핵심 변수: 이 날짜는 세부 hourly score 범위를 넘어가는 날짜임.",
+    "결론: 상세 점수보다 outlook으로 보는 편이 맞음.",
+    `요청 시점: ${requestedDate}는 reduced-detail 구간이므로 full score 대신 coarse planning으로 답하기.`,
+    `기타 변수: 추천 모드는 ${recommendedMode}.`,
+    `추천 시간: ${recommendedTool}로 다시 조회.`,
+    "Reference only. Do not expose these labels verbatim to the user:",
+    `- report_kind: ${report?.report_kind ?? "n/a"}`,
+    `- recommended_tool: ${recommendedTool}`,
+    `- recommended_mode: ${recommendedMode}`,
+    `- requested_date: ${requestedDate}`,
+  ].join("\n");
+}
+
 export function buildScoreToolContent(report) {
+  if (report?.report_kind === "fallback_required") {
+    return buildScoreFallbackToolContent(report);
+  }
+
+  const resolvedMode =
+    report?.request_context?.resolved_mode
+    ?? report?.scores?.active_mode
+    ?? report?.summary?.active_mode
+    ?? "general";
   const timezone = getBriefingTimezone(report);
   const bestWindow = formatWindowForBriefing(
     report?.derived_recommendations?.mode_best_window ?? report?.derived_recommendations?.best_window,
@@ -283,68 +467,122 @@ export function buildScoreToolContent(report) {
   const riskText = blockers.length ? blockers.join(", ") : "n/a";
   const secondaryFactors = buildSecondaryFactorSummary(report);
   const purposeFit = buildPurposeFitLabel(report);
-  const advancedTip = report?.request_context?.advanced_tip ?? null;
+  const reasonFocus = buildReasonFocus(report);
+  const surveyFactors = buildSurveyFactors(report);
+  const requiredPreparation = buildRequiredPreparation(report);
+  const operatorTip = buildOperatorTip(report);
+  const trendTable = buildScoreTrendTable(report, timezone);
+  const ignoredTargetName = report?.request_context?.ignored_target_name ?? null;
+  const generalModeGuard =
+    resolvedMode === "general"
+      ? [
+        "When resolved_mode is general, keep the answer mode-neutral.",
+        "Do not mention Milky Way, deep-sky, star-trail, target altitude, or filter advice unless the user explicitly asked for that subtype.",
+        "Do not mention missing target planning or target-altitude limitations unless the user explicitly asked about a specific target.",
+        "When resolved_mode is general, the final answer must explicitly say that if the user names the shooting theme more precisely, the system can re-check with a more purpose-fit mode.",
+      ]
+      : [];
+  const ignoredTargetGuard = ignoredTargetName
+    ? [
+        `If ignored_target_name is present, say briefly that target-specific altitude planning was unavailable for '${ignoredTargetName}' and keep the answer focused on location/time conditions.`,
+      ]
+    : [];
 
   return [
     ...buildReplyContractLines(
-      advancedTip
-        ? ["If optional_advanced_tip exists, add only one short extra line in the form '~가 있다면 ~하세요'. Keep it skippable for beginners."]
-        : [],
+      [
+        ...generalModeGuard,
+        ...ignoredTargetGuard,
+        "The answer should read like a short field report, with one short paragraph or line per section.",
+      ],
     ),
     "Use this answer skeleton by default:",
-    `핵심 변수: ${riskText}.`,
-    `결론: ${verdict}.`,
-    "요청 시점: 사용자가 물은 시간이나 대상을 best_window와 간략히 비교해 답하기.",
-    `기타 변수: ${secondaryFactors}.`,
-    ...(advancedTip ? [`추가 팁: ${advancedTip}.`] : []),
-    `추천 시간: ${bestWindow}.`,
+    `추천 시간: **${bestWindow}**.`,
+    `판단 이유: ${reasonFocus} 중심으로 왜 이 시간이 가장 좋은지 설명하고, 사용자가 물은 시간이나 대상이 있다면 그 조건과 ${bestWindow}를 반드시 비교하기. 필요하면 ${timingHint}와 ${riskText}, ${secondaryFactors}를 참고하기.`,
+    ...(trendTable ? ["시간대별 점수 추이:", trendTable] : []),
+    `이번 계산에 반영한 요소: ${surveyFactors}.`,
+    ...(requiredPreparation ? [`필수 준비물: ${requiredPreparation}.`] : []),
+    `숙련자 참고: ${operatorTip}.`,
     "Reference only. Do not expose these labels verbatim to the user:",
     `- purpose_fit: ${purposeFit || "n/a"}`,
     `- best_window: ${bestWindow}`,
     `- timing_hint: ${timingHint}`,
+    `- reason_focus: ${reasonFocus}`,
+    `- survey_factors: ${surveyFactors}`,
     `- main_risks: ${riskText}`,
     `- secondary_factors: ${secondaryFactors}`,
     `- requested_mode: ${report?.request_context?.requested_mode ?? "n/a"}`,
     `- resolved_mode: ${report?.request_context?.resolved_mode ?? report?.scores?.active_mode ?? "n/a"}`,
     `- resolution_reason: ${report?.request_context?.resolution_reason ?? "n/a"}`,
     `- shooting_goal: ${report?.request_context?.shooting_goal ?? "n/a"}`,
-    `- optional_advanced_tip: ${advancedTip ?? "n/a"}`,
+    `- ignored_target_name: ${report?.request_context?.ignored_target_name ?? "n/a"}`,
+    `- operator_tip: ${operatorTip}`,
     `- readiness: milky_way=${report?.derived_recommendations?.milky_way_ready ?? "n/a"}, deep_sky=${report?.derived_recommendations?.deep_sky_ready ?? "n/a"}`,
   ].join("\n");
 }
 
 export function buildOutlookToolContent(report) {
+  const resolvedMode =
+    report?.request_context?.resolved_mode
+    ?? report?.summary?.active_mode
+    ?? report?.scores?.active_mode
+    ?? "general";
   const timezone = getBriefingTimezone(report);
   const blocks = Array.isArray(report?.outlook_blocks) ? report.outlook_blocks : [];
   const firstBlocker = humanizeBlocker(blocks.find((block) => block?.primary_blocker)?.primary_blocker ?? "n/a");
   const verdict = humanizeVerdict(report?.summary?.go_no_go_outlook);
   const bestBlock = formatWindowForBriefing(report?.summary?.best_block ?? report?.summary?.best_block_label, timezone);
-  const advancedTip = report?.request_context?.advanced_tip ?? null;
   const purposeFit = buildPurposeFitLabel(report);
+  const reasonFocus = buildReasonFocus(report);
+  const surveyFactors = buildSurveyFactors(report);
+  const requiredPreparation = buildRequiredPreparation(report);
+  const operatorTip = buildOperatorTip(report);
+  const trendTable = buildOutlookTrendTable(report, timezone);
+  const ignoredTargetName = report?.request_context?.ignored_target_name ?? null;
+  const generalModeGuard =
+    resolvedMode === "general"
+      ? [
+          "When resolved_mode is general, keep the answer mode-neutral and planning-focused.",
+          "Do not turn a general outlook into Milky Way, deep-sky, target-altitude, or filter-specific advice unless the user explicitly asked for that subtype.",
+          "Recommend the best general observing block instead of any genre-specific peak.",
+          "Do not mention missing target planning or target-altitude limitations unless the user explicitly asked about a specific target.",
+          "When resolved_mode is general, the final answer must explicitly say that if the user names the shooting theme more precisely, the system can re-check with a more purpose-fit mode.",
+        ]
+      : [];
+  const ignoredTargetGuard = ignoredTargetName
+    ? [
+        `If ignored_target_name is present, say briefly that target-specific altitude planning was unavailable for '${ignoredTargetName}' and keep the answer focused on location/time conditions.`,
+      ]
+    : [];
 
   return [
     ...buildReplyContractLines(
-      advancedTip
-        ? ["If optional_advanced_tip exists, add only one short extra line in the form '~가 있다면 ~하세요'. Keep it skippable for beginners."]
-        : [],
+      [
+        ...generalModeGuard,
+        ...ignoredTargetGuard,
+        "The answer should read like a short field report, with one short paragraph or line per section.",
+      ],
     ),
     "Use this answer skeleton by default:",
-    `핵심 변수: ${firstBlocker}.`,
-    `결론: ${verdict}.`,
-    "요청 시점: 사용자가 물은 날짜나 시간대를 가장 좋은 outlook block과 간략히 비교해 답하기.",
-    "기타 변수: 구름, 투명도, 달 영향, 안정도를 짧게 한 줄로 묶어 말하기.",
-    ...(advancedTip ? [`추가 팁: ${advancedTip}.`] : []),
-    `추천 시간: ${bestBlock ?? "가장 높은 outlook block"}.`,
+    `추천 시간: **${bestBlock ?? "가장 높은 outlook block"}**.`,
+    `판단 이유: ${reasonFocus} 중심으로 왜 이 planning block이 가장 좋은지 설명하고, 사용자가 물은 날짜나 시간대가 있다면 그 조건과 ${bestBlock ?? "가장 높은 outlook block"}을 반드시 비교하기. 필요하면 ${firstBlocker}와 outlook score를 참고하기.`,
+    ...(trendTable ? ["시간대별 전망 추이:", trendTable] : []),
+    `이번 계산에 반영한 요소: ${surveyFactors}.`,
+    ...(requiredPreparation ? [`필수 준비물: ${requiredPreparation}.`] : []),
+    `숙련자 참고: ${operatorTip}.`,
     "Reference only. Do not expose these labels verbatim to the user:",
     `- purpose_fit: ${purposeFit || "n/a"}`,
     `- overall_outlook_score: ${report?.summary?.overall_outlook_score ?? "n/a"}`,
     `- strongest_blocker: ${firstBlocker}`,
     `- best_block: ${bestBlock ?? "n/a"}`,
+    `- reason_focus: ${reasonFocus}`,
+    `- survey_factors: ${surveyFactors}`,
     `- requested_mode: ${report?.request_context?.requested_mode ?? "n/a"}`,
     `- resolved_mode: ${report?.request_context?.resolved_mode ?? report?.summary?.active_mode ?? "n/a"}`,
     `- resolution_reason: ${report?.request_context?.resolution_reason ?? "n/a"}`,
     `- shooting_goal: ${report?.request_context?.shooting_goal ?? "n/a"}`,
-    `- optional_advanced_tip: ${advancedTip ?? "n/a"}`,
+    `- ignored_target_name: ${report?.request_context?.ignored_target_name ?? "n/a"}`,
+    `- operator_tip: ${operatorTip}`,
     `- outlook_blocks: ${blocks.length}`,
   ].join("\n");
 }
@@ -427,9 +665,15 @@ export function createDarkSkyServer({ publicBaseUrl = "http://localhost:3000", k
     }),
   );
 
-  const scoreToolInputSchema = {
-    latitude: z.number().min(33).max(39.5).optional().describe("Latitude in Korea-friendly range. Only pass this when the user explicitly supplied coordinates."),
-    longitude: z.number().min(124).max(132).optional().describe("Longitude in Korea-friendly range. Only pass this when the user explicitly supplied coordinates."),
+  const scoreToolTargetInputSchema = z.object({
+    name: z
+      .string()
+      .min(2)
+      .optional()
+      .describe("Known target name such as 'Andromeda Galaxy', 'Orion Nebula', or 'Milky Way Core'. Use only when the user explicitly named a target. Do not invent target names, custom coordinates, or category labels. Never use placeholders like 'general', 'none', 'sky', '하늘', or '일반'."),
+  }).strict();
+
+  const scoreToolInputSchema = z.object({
     place_query: z.string().min(2).optional().describe("Korean place name or address resolved through Kakao Local API. Use the user's raw Korean place name directly before asking a follow-up."),
     date: z
       .string()
@@ -445,31 +689,16 @@ export function createDarkSkyServer({ publicBaseUrl = "http://localhost:3000", k
       .min(2)
       .max(200)
       .optional()
-      .describe("Optional free-text shooting intent such as '은하수', '별궤적', 'M42 광대역', or '북아메리카 성운 협대역'. Use this when the user's purpose is clearer than the explicit mode. If the purpose is vague, keep mode as general and pass the raw wording here instead of asking a clarifying question first."),
-    site_profile: z
-      .object({
-        bortle_class: z.number().int().min(1).max(9).optional(),
-        elevation_m: z.number().min(-100).max(9000).optional(),
-        near_water: z.boolean().optional(),
-      })
-      .optional()
-      .describe("Only include site profile fields when the user explicitly supplied them. Otherwise omit them."),
-    target: z
-      .object({
-        name: z.string().min(2).optional().describe("Known target name such as 'Andromeda Galaxy', 'Orion Nebula', or 'Milky Way Core'. Prefer this over custom coordinates when the user named a target."),
-        ra_hours: z.number().min(0).max(24).optional().describe("Custom target right ascension in hours. Only pass this when the user explicitly supplied target coordinates."),
-        dec_degrees: z.number().min(-90).max(90).optional().describe("Custom target declination in degrees. Only pass this when the user explicitly supplied target coordinates."),
-        category: z.string().optional().describe("Optional target category label copied from a known target context. Do not invent a custom label if the target is vague."),
-      })
-      .optional(),
-  };
+      .describe("Optional free-text shooting intent such as '은하수', '별궤적', 'M42 광대역', or '북아메리카 성운 협대역'. Use this when the user explicitly named a celestial subject or directly named a shooting type like Milky Way or star trail. If no celestial target is explicitly stated, keep mode as general by default instead of upgrading to a target-specific deep-sky mode. If the purpose is vague, keep mode as general and pass the raw wording here instead of asking a clarifying question first. Do not rewrite a vague request into a specific Milky Way or deep-sky subtype."),
+    target: scoreToolTargetInputSchema.optional(),
+  }).strict();
 
   server.registerTool(
     "score_night_sky",
     buildReadOnlyToolConfig({
       title: "Score night sky conditions",
       description:
-        "Use this when you want a detailed dark-sky score, timing windows, and astrophotography recommendations for a Korean observing site. If the user gives a Korean place name, call the tool with place_query before asking follow-up questions. Fill shooting_goal when the user clearly implies a purpose such as Milky Way, star trail, broadband deep-sky, or narrowband deep-sky even if mode is omitted. If the purpose is vague, default to general mode and still call the tool instead of asking a clarifying question first. Do not invent coordinates, site profile fields, or custom target coordinates; prefer the user's raw place_query and named target only. When explaining results, compare the user's requested target or time against the best window, keep the default answer short, and expand only if the user asks for more detail.",
+        "Use this when you want a detailed dark-sky score, timing windows, and astrophotography recommendations for a Korean observing site for dates up to roughly 5 days ahead. If the user gives a Korean place name, call the tool with place_query before asking follow-up questions. Fill shooting_goal when the user clearly implies a purpose such as Milky Way, star trail, broadband deep-sky, or narrowband deep-sky even if mode is omitted. However, if the user did not explicitly name a celestial target, keep mode as general by default unless they directly named a shooting type like Milky Way or star trail. If the purpose is vague, default to general mode and still call the tool instead of asking a clarifying question first, and do not rewrite a vague request into a specific Milky Way or deep-sky subtype. Prefer the user's raw place_query and a known target name only. For general or vague requests, omit target entirely. Do not invent target names or unsupported fields. When explaining results, compare the user's requested target or time against the best window, present the time-based score trend as a compact table, explicitly highlight the best window, and keep the answer in a short report order: best time window, reason and comparison, trend table, survey factors, expert tip.",
       inputSchema: scoreToolInputSchema,
       invoking: "Scoring sky conditions",
       invoked: "Sky score ready",
@@ -495,9 +724,7 @@ export function createDarkSkyServer({ publicBaseUrl = "http://localhost:3000", k
     },
   );
 
-  const outlookToolInputSchema = {
-    latitude: z.number().min(33).max(39.5).optional().describe("Latitude in Korea-friendly range. Only pass this when the user explicitly supplied coordinates."),
-    longitude: z.number().min(124).max(132).optional().describe("Longitude in Korea-friendly range. Only pass this when the user explicitly supplied coordinates."),
+  const outlookToolInputSchema = z.object({
     place_query: z.string().min(2).optional().describe("Korean place name or address resolved through Kakao Local API. Use the user's raw Korean place name directly before asking a follow-up."),
     date: z
       .string()
@@ -513,31 +740,16 @@ export function createDarkSkyServer({ publicBaseUrl = "http://localhost:3000", k
       .min(2)
       .max(200)
       .optional()
-      .describe("Optional free-text shooting intent used to resolve the right planning mode when the user did not spell it out. If the purpose is vague, keep mode as general and pass the raw wording here instead of asking a clarifying question first."),
-    site_profile: z
-      .object({
-        bortle_class: z.number().int().min(1).max(9).optional(),
-        elevation_m: z.number().min(-100).max(9000).optional(),
-        near_water: z.boolean().optional(),
-      })
-      .optional()
-      .describe("Only include site profile fields when the user explicitly supplied them. Otherwise omit them."),
-    target: z
-      .object({
-        name: z.string().min(2).optional().describe("Known target name such as 'Andromeda Galaxy', 'Orion Nebula', or 'Milky Way Core'. Prefer this over custom coordinates when the user named a target."),
-        ra_hours: z.number().min(0).max(24).optional().describe("Custom target right ascension in hours. Only pass this when the user explicitly supplied target coordinates."),
-        dec_degrees: z.number().min(-90).max(90).optional().describe("Custom target declination in degrees. Only pass this when the user explicitly supplied target coordinates."),
-        category: z.string().optional().describe("Optional target category label copied from a known target context. Do not invent a custom label if the target is vague."),
-      })
-      .optional(),
-  };
+      .describe("Optional free-text shooting intent used to resolve the right planning mode when the user did not spell it out. Use this when the user explicitly named a celestial subject or directly named a shooting type like Milky Way or star trail. If no celestial target is explicitly stated, keep mode as general by default instead of upgrading to a target-specific deep-sky mode. If the purpose is vague, keep mode as general and pass the raw wording here instead of asking a clarifying question first. Do not rewrite a vague request into a specific Milky Way or deep-sky subtype."),
+    target: scoreToolTargetInputSchema.optional(),
+  }).strict();
 
   server.registerTool(
     "score_night_sky_outlook",
     buildReadOnlyToolConfig({
       title: "Get a coarse night outlook",
       description:
-        "Use this when the target date is farther out and you only need a coarse planning outlook instead of full hourly detail. If the user gives a Korean place name, call the tool with place_query before asking follow-up questions. Fill shooting_goal when the user implies a purpose such as Milky Way, star trail, or deep-sky. If the purpose is vague, default to general mode and still call the tool instead of asking a clarifying question first. Do not invent coordinates, site profile fields, or custom target coordinates; prefer the user's raw place_query and named target only. When explaining results, compare the user's requested target or time against the best planning block and keep the default answer short.",
+        "Use this when the target date is farther out and you only need a coarse planning outlook instead of full hourly detail, especially beyond roughly 5 days ahead. If the user gives a Korean place name, call the tool with place_query before asking follow-up questions. Fill shooting_goal when the user implies a purpose such as Milky Way, star trail, or deep-sky. However, if the user did not explicitly name a celestial target, keep mode as general by default unless they directly named a shooting type like Milky Way or star trail. If the purpose is vague, default to general mode and still call the tool instead of asking a clarifying question first, and do not rewrite a vague request into a specific Milky Way or deep-sky subtype. Prefer the user's raw place_query and a known target name only. For general or vague requests, omit target entirely. Do not invent target names or unsupported fields. When explaining results, compare the user's requested target or time against the best planning block, present the block trend as a compact table, explicitly highlight the best block, and keep the answer in a short report order: best time window, reason and comparison, trend table, survey factors, expert tip.",
       inputSchema: outlookToolInputSchema,
       invoking: "Building night outlook",
       invoked: "Night outlook ready",
@@ -568,12 +780,10 @@ export function createDarkSkyServer({ publicBaseUrl = "http://localhost:3000", k
       title: "Estimate light pollution and Bortle-like class",
       description:
         "Use this when you want a local light-pollution baseline and Bortle-like estimate for a Korean location. When explaining results, keep the estimate concise and tie it back to the user's requested target or shooting plan instead of giving a long standalone explanation.",
-      inputSchema: {
-        latitude: z.number().min(33).max(39.5).optional().describe("Latitude in Korea-friendly range."),
-        longitude: z.number().min(124).max(132).optional().describe("Longitude in Korea-friendly range."),
+      inputSchema: z.object({
         place_query: z.string().min(2).optional().describe("Korean place name or address resolved through Kakao Local API."),
         location_name: z.string().optional(),
-      },
+      }).strict(),
       invoking: "Estimating light pollution",
       invoked: "Light estimate ready",
       openWorldHint: true,

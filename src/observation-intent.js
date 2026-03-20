@@ -170,14 +170,6 @@ function buildAdvancedTip(resolvedMode, tags, targetInput) {
     return "협대역 또는 듀얼밴드 필터가 있다면 달빛이 조금 남아도 그 구성이 더 버티기 쉽습니다";
   }
 
-  if (resolvedMode === "wide_field_milky_way") {
-    return "광각 광대역 촬영이라면 달빛과 투명도를 먼저 보고, 바람은 그다음 변수로 보세요";
-  }
-
-  if (resolvedMode === "star_trail") {
-    return "인터벌 릴리즈가 있다면 가장 긴 무구름 구간을 메인 세션으로 잡으세요";
-  }
-
   return null;
 }
 

@@ -73,7 +73,18 @@ function resolveScoringIntent(parsed) {
     shootingGoal: parsed.shooting_goal,
     target: parsed.target,
   });
-  const resolvedTarget = intent.target ? resolveTargetInput(intent.target) : null;
+  let resolvedTarget = null;
+
+  if (intent.target) {
+    try {
+      resolvedTarget = resolveTargetInput(intent.target);
+    } catch (error) {
+      const hasExplicitCoordinates = intent.target.ra_hours !== undefined && intent.target.dec_degrees !== undefined;
+      if (hasExplicitCoordinates) {
+        throw error;
+      }
+    }
+  }
 
   return {
     intent,
@@ -91,6 +102,7 @@ function attachRequestContext(report, intent, resolvedTarget) {
     intent_tags: intent.intent_tags,
     target_inferred_from_goal: intent.target_inferred_from_goal,
     advanced_tip: intent.advanced_tip,
+    ignored_target_name: !resolvedTarget && intent.target?.name ? intent.target.name : null,
     resolved_target: resolvedTarget
       ? {
           name: resolvedTarget.name,
@@ -101,6 +113,85 @@ function attachRequestContext(report, intent, resolvedTarget) {
   };
 
   return report;
+}
+
+function round(value, digits = 1) {
+  const factor = 10 ** digits;
+  return Math.round(value * factor) / factor;
+}
+
+function calculateDistanceKm(latitudeA, longitudeA, latitudeB, longitudeB) {
+  const toRadians = (degrees) => degrees * (Math.PI / 180);
+  const earthRadiusKm = 6371;
+  const dLat = toRadians(latitudeB - latitudeA);
+  const dLon = toRadians(longitudeB - longitudeA);
+  const lat1 = toRadians(latitudeA);
+  const lat2 = toRadians(latitudeB);
+  const a =
+    Math.sin(dLat / 2) ** 2
+    + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+
+  return 2 * earthRadiusKm * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+export function reconcileObservationPoint(parsed, resolvedPlace = null, conflictThresholdKm = 20) {
+  const hasCoordinates = parsed.latitude !== undefined && parsed.longitude !== undefined;
+
+  if (hasCoordinates && resolvedPlace) {
+    const distanceKm = calculateDistanceKm(
+      parsed.latitude,
+      parsed.longitude,
+      resolvedPlace.latitude,
+      resolvedPlace.longitude,
+    );
+
+    if (distanceKm > conflictThresholdKm) {
+      return {
+        latitude: resolvedPlace.latitude,
+        longitude: resolvedPlace.longitude,
+        locationName: parsed.location_name ?? resolvedPlace.locationName,
+        resolvedFrom: "place_query",
+        resolvedPlace,
+        inputCoordinates: {
+          latitude: parsed.latitude,
+          longitude: parsed.longitude,
+        },
+        coordinateConflictKm: round(distanceKm),
+        coordinatesOverriddenByPlaceQuery: true,
+      };
+    }
+
+    return {
+      latitude: parsed.latitude,
+      longitude: parsed.longitude,
+      locationName: parsed.location_name ?? resolvedPlace.locationName,
+      resolvedFrom: "coordinates",
+      resolvedPlace,
+      coordinateMatchKm: round(distanceKm),
+      coordinatesOverriddenByPlaceQuery: false,
+    };
+  }
+
+  if (hasCoordinates) {
+    return {
+      latitude: parsed.latitude,
+      longitude: parsed.longitude,
+      locationName: parsed.location_name,
+      resolvedFrom: "coordinates",
+    };
+  }
+
+  if (!resolvedPlace) {
+    throw new Error("resolvedPlace is required when coordinates are not available.");
+  }
+
+  return {
+    latitude: resolvedPlace.latitude,
+    longitude: resolvedPlace.longitude,
+    locationName: parsed.location_name ?? resolvedPlace.locationName,
+    resolvedFrom: "place_query",
+    resolvedPlace,
+  };
 }
 
 export const lightPollutionInputSchema = z
@@ -515,7 +606,7 @@ function buildDistantFallbackPayload(parsed, publicBaseUrl = null) {
       ? { latitude: parsed.latitude, longitude: parsed.longitude }
       : { place_query: parsed.place_query }),
     ...(parsed.location_name ? { location_name: parsed.location_name } : {}),
-    ...(parsed.shooting_goal ? { shooting_goal: parsed.shooting_goal } : {}),
+    ...(intent.shooting_goal ? { shooting_goal: intent.shooting_goal } : {}),
     ...(hasSiteProfile ? { site_profile: parsed.site_profile } : {}),
     ...(intent.target ? { target: intent.target } : {}),
   };
@@ -546,8 +637,8 @@ function buildDistantFallbackPayload(parsed, publicBaseUrl = null) {
     if (parsed.location_name) {
       params.set("location_name", parsed.location_name);
     }
-    if (parsed.shooting_goal) {
-      params.set("shooting_goal", parsed.shooting_goal);
+    if (intent.shooting_goal) {
+      params.set("shooting_goal", intent.shooting_goal);
     }
     if (parsed.site_profile?.bortle_class !== undefined) {
       params.set("bortle_class", String(parsed.site_profile.bortle_class));
@@ -577,13 +668,20 @@ function buildDistantFallbackPayload(parsed, publicBaseUrl = null) {
 }
 
 async function resolveObservationPoint(parsed, kakaoRestApiKey) {
-  if (parsed.latitude !== undefined && parsed.longitude !== undefined) {
-    return {
-      latitude: parsed.latitude,
-      longitude: parsed.longitude,
-      locationName: parsed.location_name,
-      resolvedFrom: "coordinates",
-    };
+  const hasCoordinates = parsed.latitude !== undefined && parsed.longitude !== undefined;
+  const canResolvePlace = Boolean(parsed.place_query) && Boolean(kakaoRestApiKey);
+
+  if (canResolvePlace) {
+    const resolved = await resolvePlaceQuery({
+      query: parsed.place_query,
+      restApiKey: kakaoRestApiKey,
+    });
+
+    return reconcileObservationPoint(parsed, resolved);
+  }
+
+  if (hasCoordinates) {
+    return reconcileObservationPoint(parsed);
   }
 
   const resolved = await resolvePlaceQuery({
@@ -591,13 +689,28 @@ async function resolveObservationPoint(parsed, kakaoRestApiKey) {
     restApiKey: kakaoRestApiKey,
   });
 
-  return {
-    latitude: resolved.latitude,
-    longitude: resolved.longitude,
-    locationName: parsed.location_name ?? resolved.locationName,
-    resolvedFrom: "place_query",
-    resolvedPlace: resolved,
-  };
+  return reconcileObservationPoint(parsed, resolved);
+}
+
+function attachObservationResolution(location, observationPoint, placeQuery) {
+  if (observationPoint.resolvedPlace) {
+    location.resolved_from = observationPoint.resolvedFrom;
+    location.place_query = placeQuery;
+    location.resolved_place = {
+      address_name: observationPoint.resolvedPlace.addressName,
+      road_address_name: observationPoint.resolvedPlace.roadAddressName,
+      place_name: observationPoint.resolvedPlace.placeName,
+      provider: observationPoint.resolvedPlace.provider,
+    };
+  }
+
+  if (observationPoint.coordinatesOverriddenByPlaceQuery) {
+    location.input_coordinates = observationPoint.inputCoordinates;
+    location.coordinate_conflict_km = observationPoint.coordinateConflictKm;
+    location.coordinate_resolution = "place_query_overrode_conflicting_coordinates";
+  } else if (observationPoint.coordinateMatchKm !== undefined) {
+    location.coordinate_match_km = observationPoint.coordinateMatchKm;
+  }
 }
 
 export async function getLightPollutionReport(input) {
@@ -617,7 +730,7 @@ export async function getLightPollutionReport(input) {
     };
   }
 
-  return {
+  const report = {
     location: {
       name: observationPoint.locationName ?? "Requested location",
       latitude: observationPoint.latitude,
@@ -633,6 +746,9 @@ export async function getLightPollutionReport(input) {
       },
     ],
   };
+
+  attachObservationResolution(report.location, observationPoint, parsed.place_query);
+  return report;
 }
 
 export function getLightPollutionMethodologyReport() {
@@ -695,16 +811,7 @@ export async function getNightSkyScoreReport(input) {
   report.detail_policy = detailPolicy;
   attachRequestContext(report, intent, resolvedTarget);
 
-  if (observationPoint.resolvedPlace) {
-    report.location.resolved_from = observationPoint.resolvedFrom;
-    report.location.place_query = parsed.place_query;
-    report.location.resolved_place = {
-      address_name: observationPoint.resolvedPlace.addressName,
-      road_address_name: observationPoint.resolvedPlace.roadAddressName,
-      place_name: observationPoint.resolvedPlace.placeName,
-      provider: observationPoint.resolvedPlace.provider,
-    };
-  }
+  attachObservationResolution(report.location, observationPoint, parsed.place_query);
 
   return report;
 }
@@ -813,16 +920,7 @@ export async function getNightSkyOutlookReport(input) {
   };
   attachRequestContext(report, intent, resolvedTarget);
 
-  if (observationPoint.resolvedPlace) {
-    report.location.resolved_from = observationPoint.resolvedFrom;
-    report.location.place_query = parsed.place_query;
-    report.location.resolved_place = {
-      address_name: observationPoint.resolvedPlace.addressName,
-      road_address_name: observationPoint.resolvedPlace.roadAddressName,
-      place_name: observationPoint.resolvedPlace.placeName,
-      provider: observationPoint.resolvedPlace.provider,
-    };
-  }
+  attachObservationResolution(report.location, observationPoint, parsed.place_query);
 
   return report;
 }
@@ -834,6 +932,7 @@ export function buildPromptText({ publicBaseUrl }) {
     "응답은 기본적으로 4~6줄 안팎으로 짧게 유지하고, 사용자가 더 자세한 설명을 원할 때만 확장하세요.",
     "사용자가 묻는 천체, 시간대, 촬영 목적을 먼저 확인하고 그 요청이 best_window 또는 outlook block과 얼마나 맞는지 간략히 비교하세요.",
     "특히 shooting_goal, request_context.resolved_mode, astronomy_context.target 이 있으면 그 목적에 맞는 판단을 우선하세요.",
+    "천체가 명시적으로 입력되지 않았다면 딥스카이 대상 촬영으로 올려 잡지 말고 general 관측/촬영으로 답하세요. 예외는 사용자가 은하수 또는 별궤적처럼 촬영 타입을 직접 말한 경우입니다.",
     "다음 순서로 간략히 설명해주세요.",
     "1. 핵심 변수",
     "2. 결론",

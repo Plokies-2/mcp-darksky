@@ -43,6 +43,30 @@ function generateReport(hourlyForecast, siteProfile = { bortleClass: 3 }, option
   });
 }
 
+function generateReportByDate({
+  date,
+  time,
+  mode = "general",
+  siteProfile = { bortleClass: 3 },
+  target = null,
+  hourlyForecast,
+}) {
+  const baseHour = buildHour(time);
+  const reportHours = hourlyForecast ?? [baseHour];
+
+  return generateNightSkyReport({
+    latitude: 35.15,
+    longitude: 128.99,
+    date,
+    timezone: "Asia/Seoul",
+    locationName: "Busan Test Site",
+    hourlyForecast: reportHours,
+    siteProfile,
+    mode,
+    target,
+  });
+}
+
 function generateReportWithTarget(hourlyForecast, target) {
   return generateNightSkyReport({
     latitude: 35.15,
@@ -327,6 +351,81 @@ test("mode presets react differently to moonlit conditions", () => {
   assert.equal(milkyWay.scores.active_mode, "wide_field_milky_way");
   assert.equal(nightscape.scores.active_mode, "wide_field_nightscape");
   assert.ok(nightscape.scores.mode_score >= milkyWay.scores.mode_score);
+});
+
+test("narrowband deep-sky is more moon-tolerant than broadband under bright-moon, close-separation conditions", () => {
+  const target = {
+    name: "Andromeda Galaxy",
+    raHours: 0 + 42 / 60 + 44.3 / 3600,
+    decDegrees: 41 + 16 / 60 + 9 / 3600,
+    source: "catalog",
+    category: "deep_sky",
+  };
+
+  const broad = generateReportByDate({
+    date: "2026-01-01",
+    time: "2026-01-01T12:00:00Z",
+    mode: "broadband_deep_sky",
+    target,
+  });
+  const narrow = generateReportByDate({
+    date: "2026-01-01",
+    time: "2026-01-01T12:00:00Z",
+    mode: "narrowband_deep_sky",
+    target,
+  });
+
+  const broadHour = broad.hourly_conditions[0];
+  const narrowHour = narrow.hourly_conditions[0];
+
+  assert.equal(broad.scores.active_mode, "broadband_deep_sky");
+  assert.equal(narrow.scores.active_mode, "narrowband_deep_sky");
+  assert.equal(broadHour.moon_context.visible, true);
+  assert.ok(broadHour.moon_context.illumination_fraction >= 0.9);
+  assert.ok(narrow.scores.mode_score >= broad.scores.mode_score);
+  assert.ok(narrow.scores.mode_score > 60);
+});
+
+test("deep-sky target-altitude cap and cloud impact are still enforced for narrowband", () => {
+  const target = {
+    name: "Andromeda Galaxy",
+    raHours: 0 + 42 / 60 + 44.3 / 3600,
+    decDegrees: 41 + 16 / 60 + 9 / 3600,
+    source: "catalog",
+    category: "deep_sky",
+  };
+
+  const brightLowAlt = generateReportByDate({
+    date: "2026-01-05",
+    time: "2026-01-05T14:00:00Z",
+    mode: "narrowband_deep_sky",
+    target,
+  });
+  const brightHighAlt = generateReportByDate({
+    date: "2026-01-01",
+    time: "2026-01-01T12:00:00Z",
+    mode: "narrowband_deep_sky",
+    target,
+  });
+  const highAltCloudy = generateReportByDate({
+    date: "2026-01-01",
+    time: "2026-01-01T12:00:00Z",
+    mode: "narrowband_deep_sky",
+    target,
+    hourlyForecast: [buildHour("2026-01-01T12:00:00Z", {
+      cloud_cover: 95,
+      cloud_cover_low: 95,
+      cloud_cover_mid: 90,
+      cloud_cover_high: 85,
+    })],
+  });
+
+  assert.ok(brightLowAlt.hourly_conditions[0].target_context.altitude_score < 45);
+  assert.equal(brightLowAlt.hourly_conditions[0].mode_score, 50);
+  assert.ok(brightHighAlt.hourly_conditions[0].target_context.altitude_score > 80);
+  assert.ok(brightHighAlt.hourly_conditions[0].mode_score > brightLowAlt.hourly_conditions[0].mode_score);
+  assert.ok(highAltCloudy.hourly_conditions[0].cloud_score < brightHighAlt.hourly_conditions[0].cloud_score);
+  assert.ok(highAltCloudy.hourly_conditions[0].mode_score < brightHighAlt.hourly_conditions[0].mode_score);
 });
 
 test("deep-sky modes include target altitude in mode context", () => {

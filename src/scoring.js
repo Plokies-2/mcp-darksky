@@ -349,6 +349,10 @@ function calculateMoonTargetClearanceScore(hour, mode) {
     return clamp(65 + (separationDegrees / 180) * 35, 65, 100);
   }
 
+  if (mode === "narrowband_deep_sky") {
+    return clamp(68 + (separationDegrees / 180) * 32, 68, 100);
+  }
+
   return clamp((separationDegrees / 90) * 100, 10, 100);
 }
 
@@ -431,7 +435,8 @@ function scoreHour(hour, previousHour, siteProfile, mode = "general", target = n
   let modeScore = computeBaseScore(modeProfile.weights, componentScores);
 
   if (mode !== "wide_field_nightscape" && mode !== "star_trail") {
-    modeScore = modeScore * 0.85 + moonTargetClearanceScore * 0.15;
+    const moonPenaltyBlend = mode === "narrowband_deep_sky" ? 0.1 : 0.15;
+    modeScore = modeScore * (1 - moonPenaltyBlend) + moonTargetClearanceScore * moonPenaltyBlend;
   }
   if ((mode === "broadband_deep_sky" || mode === "narrowband_deep_sky") && targetAltitudeScore !== null) {
     modeScore *= 0.7 + 0.3 * (targetAltitudeScore / 100);

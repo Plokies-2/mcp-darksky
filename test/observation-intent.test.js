@@ -11,7 +11,7 @@ test("resolves Milky Way wide-field intent from shooting_goal", () => {
   assert.equal(intent.resolved_mode, "wide_field_milky_way");
   assert.equal(intent.target?.name, "Milky Way Core");
   assert.equal(intent.target_inferred_from_goal, true);
-  assert.match(intent.advanced_tip ?? "", /광각 광대역 촬영/);
+  assert.equal(intent.advanced_tip, null);
 });
 
 test("resolves star-trail intent without inventing a target", () => {
@@ -22,7 +22,7 @@ test("resolves star-trail intent without inventing a target", () => {
 
   assert.equal(intent.resolved_mode, "star_trail");
   assert.equal(intent.target, null);
-  assert.match(intent.advanced_tip ?? "", /인터벌 릴리즈/);
+  assert.equal(intent.advanced_tip, null);
 });
 
 test("resolves broadband deep-sky intent from target mention", () => {

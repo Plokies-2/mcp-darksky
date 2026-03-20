@@ -6,27 +6,29 @@ import { buildHomePage, buildInstallPage } from "../src/web-ui.js";
 test("install page exposes detail panel instead of prompt link", () => {
   const html = buildInstallPage({ publicBaseUrl: "https://darksky.example.com" });
 
-  assert.match(html, /https:\/\/darksky\.example\.com\/mcp/);
-  assert.match(html, /place_query=/);
-  assert.match(html, /AI와 함께/);
-  assert.match(html, /오늘 밤 가장 알맞은/);
-  assert.match(html, /canvas class="stars"/);
-  assert.match(html, /mcp-darksky의 응답:/);
-  assert.match(html, /내일 밤 11시에 육백마지기에서 은하수 촬영 괜찮을까/);
-  assert.match(html, /ChatGPT에 붙이면 바로 쓸 수 있습니다/);
-  assert.match(html, /data-open-panel="details-panel"/);
-  assert.match(html, /VNP46A4와 VJ146A4/);
-  assert.match(html, /2026-03-19-continuous-bortle-v2-korea-calibrated/);
-  assert.doesNotMatch(html, /https:\/\/darksky\.example\.com\/prompt/);
+  assert.ok(html.includes("https://darksky.example.com/mcp"));
+  assert.ok(html.includes("place_query="));
+  assert.ok(html.includes('canvas class="stars"'));
+  assert.ok(html.includes('data-open-panel="details-panel"'));
+  assert.ok(html.includes("2026-03-19-continuous-bortle-v2-korea-calibrated"));
+  assert.ok(html.includes("| 시간대 | 점수 | 핵심 변수 |"));
+  assert.ok(html.includes("이번 계산에 반영한 요소"));
+  assert.ok(html.includes("필수 준비물"));
+  assert.ok(html.includes("숙련자 참고"));
+  assert.ok(!html.includes("https://darksky.example.com/prompt"));
 });
 
-test("home page advertises install guide", () => {
+test("home page advertises install guide and the five shooting modes", () => {
   const html = buildHomePage({ publicBaseUrl: "https://darksky.example.com" });
 
-  assert.match(html, /설치 안내 보기/);
-  assert.match(html, /https:\/\/darksky\.example\.com\/api\/score/);
-  assert.match(html, /place_query=/);
-  assert.match(html, /밤하늘 촬영 판단/);
+  assert.ok(html.includes("https://darksky.example.com/api/score"));
+  assert.ok(html.includes("place_query="));
+  assert.ok(html.includes("wide_field_milky_way"));
+  assert.ok(html.includes("wide_field_nightscape"));
+  assert.ok(html.includes("broadband_deep_sky"));
+  assert.ok(html.includes("narrowband_deep_sky"));
+  assert.ok(html.includes("star_trail"));
+  assert.ok(html.includes("추천 시간, 이유 비교, 시간대별 점수 표, 계산 요소, 준비물, 숙련자 참고"));
 });
 
 test("validateForecastDate rejects out-of-range past date", () => {
